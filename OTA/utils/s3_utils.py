@@ -11,7 +11,7 @@ import requests
 import yaml
 from botocore.exceptions import BotoCoreError, ClientError
 
-SCHEMA_URL_TEMPLATE = "https://assets.openmind.org/ota/{tag}/schema.json"
+SCHEMA_URL_TEMPLATE = "https://assets.openmind.com/ota/{tag}/schema.json"
 
 
 class S3FileDownloader:

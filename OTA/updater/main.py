@@ -5,7 +5,7 @@ import time
 from ..ota import BaseOTA
 
 OTA_UPDATER_SERVER_URL = os.getenv(
-    "OTA_UPDATER_SERVER_URL", "wss://api.openmind.org/api/core/ota/updater"
+    "OTA_UPDATER_SERVER_URL", "wss://api.openmind.com/api/core/ota/updater"
 )
 OM_API_KEY = os.getenv("OM_API_KEY")
 OM_API_KEY_ID = os.getenv("OM_API_KEY_ID")
