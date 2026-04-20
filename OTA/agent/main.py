@@ -50,7 +50,6 @@ class AgentOTA(BaseOTA):
             "watchdog": "ROS2 Watchdog service container monitoring system health",
             "zenoh_bridge": "Zenoh Bridge service container serving the communication between OM1 and ROS2",
             "om1_avatar": "OM1 Avatar container managing avatar functionalities",
-            "om1_monitor": "OM1 Monitor container for system monitoring",
             "om1_video_processor": "OM1 Video Processor container handling video streams",
             "ota_agent": "OM1 OTA Agent container for over-the-air updates",
             "ota_updater": "OM1 OTA Updater container for managing the OTA Agent updates",
