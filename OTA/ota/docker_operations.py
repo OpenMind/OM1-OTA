@@ -41,6 +41,10 @@ class DockerManager:
         bool
             True if login succeeded
         """
+        if not all([registry, username, password]):
+            logging.error("ECR login failed: missing required parameters")
+            return False
+
         try:
             cmd = ["docker", "login", "--username", username, "--password-stdin", registry]
             result = subprocess.run(
@@ -50,7 +54,7 @@ class DockerManager:
                 logging.info(f"ECR login successful: {registry}")
                 return True
             else:
-                logging.error(f"ECR login failed: {result.stderr}")
+                logging.error(f"ECR login failed for registry: {registry}")
                 return False
         except subprocess.TimeoutExpired:
             logging.error("ECR login timed out")
