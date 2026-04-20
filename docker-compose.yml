@@ -3,8 +3,8 @@ version: '3.8'
 services:
   ota_agent:
     build:
-      context: ..
-      dockerfile: ./OTA/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     image: openmindagi/ota:latest
     container_name: ota_agent
     restart: unless-stopped
@@ -27,8 +27,8 @@ services:
 
   ota_updater:
     build:
-      context: ..
-      dockerfile: ./OTA/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     image: openmindagi/ota:latest
     container_name: ota_updater
     restart: unless-stopped
