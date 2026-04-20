@@ -81,6 +81,18 @@ class BaseOTA:
                 data = json.loads(message)
                 logging.info(f"Processing OTA data: {data}")
 
+                if data.get("type") == "ecr_credentials":
+                    cred_data = data.get("data", {})
+                    self.docker_manager.login_docker_ecr(
+                        registry=cred_data.get("registry", ""),
+                        username=cred_data.get("username", ""),
+                        password=cred_data.get("password", ""),
+                    )
+                    logging.info(
+                        f"ECR credentials refreshed, expires at {cred_data.get('expires_at')}"
+                    )
+                    return
+
                 action = data.get("action")
                 service_name = data.get("service_name")
 

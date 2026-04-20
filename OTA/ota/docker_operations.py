@@ -24,6 +24,41 @@ class DockerManager:
         self.progress_reporter = progress_reporter
         self._completed_layers = set()
 
+    def login_docker_ecr(self, registry: str, username: str, password: str) -> bool:
+        """Login to an ECR private registry for pulling images.
+
+        Parameters
+        ----------
+        registry : str
+            ECR registry URL
+        username : str
+            Docker username
+        password : str
+            Temporary Docker password
+
+        Returns
+        -------
+        bool
+            True if login succeeded
+        """
+        try:
+            cmd = ["docker", "login", "--username", username, "--password-stdin", registry]
+            result = subprocess.run(
+                cmd, input=password, capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0:
+                logging.info(f"ECR login successful: {registry}")
+                return True
+            else:
+                logging.error(f"ECR login failed: {result.stderr}")
+                return False
+        except subprocess.TimeoutExpired:
+            logging.error("ECR login timed out")
+            return False
+        except Exception as e:
+            logging.error(f"ECR login error: {e}")
+            return False
+
     def stop_docker_services(self, yaml_content: dict) -> dict:
         """
         Stop Docker containers/services based on the update configuration.
