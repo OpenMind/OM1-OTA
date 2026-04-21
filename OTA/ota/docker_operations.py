@@ -46,7 +46,14 @@ class DockerManager:
             return False
 
         try:
-            cmd = ["docker", "login", "--username", username, "--password-stdin", registry]
+            cmd = [
+                "docker",
+                "login",
+                "--username",
+                username,
+                "--password-stdin",
+                registry,
+            ]
             result = subprocess.run(
                 cmd, input=password, capture_output=True, text=True, timeout=30
             )
@@ -384,10 +391,15 @@ class DockerManager:
                     "services_pulled": list(services_pulled),
                 }
             else:
-                if "pull access denied" in stdout_text and "authorization failed" in stdout_text:
+                if (
+                    "pull access denied" in stdout_text
+                    and "authorization failed" in stdout_text
+                ):
                     error_msg = "This service requires an Enterprise plan for private image access. Please upgrade your plan at https://portal.openmind.com"
                 else:
-                    error_msg = f"Pull failed with return code {return_code}: {stderr_text}"
+                    error_msg = (
+                        f"Pull failed with return code {return_code}: {stderr_text}"
+                    )
                 logging.error(error_msg)
                 return {
                     "success": False,
