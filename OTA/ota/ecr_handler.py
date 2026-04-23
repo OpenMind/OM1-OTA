@@ -9,7 +9,7 @@ from .progress_reporter import ProgressReporter
 logging.basicConfig(level=logging.INFO)
 
 ECR_CREDENTIALS_URL = os.getenv(
-    "ECR_CREDENTIALS_URL", "https://api.openmind.com/api/core/v1/ota/ecr/credentials"
+    "ECR_CREDENTIALS_URL", "https://api.openmind.com/api/core/ota/ecr/credentials"
 )
 OM_API_KEY = os.getenv("OM_API_KEY")
 
@@ -25,7 +25,7 @@ class ECRHandler:
         self.docker_manager = docker_manager
         self.progress_reporter = progress_reporter
 
-    def is_private_ecr(self, yaml_content: dict) -> str | None:
+    def check_image_privacy(self, yaml_content: dict) -> str | None:
         """Return ECR repo name if any service uses a private ECR image, else None."""
         for svc in yaml_content.get("services", {}).values():
             image = svc.get("image", "")
@@ -40,14 +40,7 @@ class ECRHandler:
                 return repo
         return None
 
-    def login_if_needed(self, yaml_content: dict) -> bool:
-        """Check for private ECR image and login if needed. Returns True on success or no ECR."""
-        ecr_image = self.is_private_ecr(yaml_content)
-        if not ecr_image:
-            return True
-        return self._fetch_credentials_and_login(ecr_image)
-
-    def _fetch_credentials_and_login(self, image: str) -> bool:
+    def login_with_credentials(self, image: str) -> bool:
         """Fetch ECR credentials via HTTP and perform docker login."""
         if not ECR_CREDENTIALS_URL or not OM_API_KEY:
             logging.error("ECR_CREDENTIALS_URL or OM_API_KEY not configured")

@@ -166,12 +166,6 @@ class ActionHandlers:
                     self.progress_reporter.send_progress_update("error", error_msg, 10)
                     return
 
-            if not isinstance(yaml_content, dict):
-                error_msg = f"Invalid YAML content for service {service_name}"
-                logging.error(error_msg)
-                self.progress_reporter.send_progress_update("error", error_msg, 10)
-                return
-
             tag = self._extract_tag_from_yaml(yaml_content)  # type: ignore
             s3_downloader = S3FileDownloader()
             s3_downloader.download_schema(tag)
@@ -180,7 +174,8 @@ class ActionHandlers:
                 env_variables = s3_downloader.get_default_env(service_name, tag)
             self.file_manager.update_env_file(service_name, tag, env_variables)
 
-            if not self.ecr_handler.login_if_needed(yaml_content):
+            ecr_image = self.ecr_handler.check_image_privacy(yaml_content)
+            if ecr_image and not self.ecr_handler.login_with_credentials(ecr_image):
                 return
 
             start_result = self.docker_manager.start_docker_services(yaml_content)  # type: ignore
@@ -389,7 +384,8 @@ class ActionHandlers:
                 self.progress_reporter.send_progress_update("error", error_msg, 10)
                 return False
 
-            if not self.ecr_handler.login_if_needed(yaml_content):
+            ecr_image = self.ecr_handler.check_image_privacy(yaml_content)
+            if ecr_image and not self.ecr_handler.login_with_credentials(ecr_image):
                 return False
 
             self.progress_reporter.send_progress_update(
