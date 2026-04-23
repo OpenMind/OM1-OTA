@@ -85,10 +85,14 @@ class BaseOTA:
 
                 msg_type = data.get("type")
                 if msg_type == "ecr_credentials":
-                    self.action_handlers.ecr_manager.on_credentials_received(data.get("data", {}))
+                    self.action_handlers.ecr_manager.on_credentials_received(
+                        data.get("data", {})
+                    )
                     return
                 if msg_type == "ecr_credentials_error":
-                    self.action_handlers.ecr_manager.on_credentials_error(data.get("error", "unknown"))
+                    self.action_handlers.ecr_manager.on_credentials_error(
+                        data.get("error", "unknown")
+                    )
                     return
 
                 action = data.get("action")
@@ -106,14 +110,16 @@ class BaseOTA:
                 if action == "upgrade":
                     threading.Thread(
                         target=self.action_handlers.handle_upgrade_action,
-                        args=(data, service_name), daemon=True
+                        args=(data, service_name),
+                        daemon=True,
                     ).start()
                 elif action == "stop":
                     self.action_handlers.handle_stop_action(data, service_name)
                 elif action == "start":
                     threading.Thread(
                         target=self.action_handlers.handle_start_action,
-                        args=(data, service_name), daemon=True
+                        args=(data, service_name),
+                        daemon=True,
                     ).start()
                 elif action == "pause":
                     self.action_handlers.handle_pause_action(data, service_name)

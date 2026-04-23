@@ -35,7 +35,7 @@ class ECRManager:
                 repo = image
                 slash_idx = repo.find("/")
                 if slash_idx > 0 and "." in repo[:slash_idx]:
-                    repo = repo[slash_idx + 1:]
+                    repo = repo[slash_idx + 1 :]
                 colon_idx = repo.find(":")
                 if colon_idx > 0:
                     repo = repo[:colon_idx]

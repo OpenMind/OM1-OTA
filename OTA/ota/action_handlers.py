@@ -35,7 +35,6 @@ class ActionHandlers:
         self.file_manager = file_manager
         self.ecr_manager = ECRManager(docker_manager, progress_reporter)
 
-
     def handle_upgrade_action(self, data: dict, service_name: str = ""):
         """
         Handle upgrade action for OTA updates.
