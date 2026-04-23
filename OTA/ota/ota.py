@@ -87,6 +87,7 @@ class BaseOTA:
                 if not action:
                     logging.error("Invalid OTA message: missing action")
                     return
+
                 if not service_name:
                     logging.error("Invalid OTA message: missing service_name")
                     return
