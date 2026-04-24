@@ -415,7 +415,9 @@ class DockerManager:
             return {
                 "success": False,
                 "error": error_msg,
-                "output": "\n".join(stdout_lines) if "stdout_lines" in locals() else "",  # pyright: ignore
+                "output": (
+                    "\n".join(stdout_lines) if "stdout_lines" in locals() else ""
+                ),  # pyright: ignore
             }
         except Exception as e:
             error_msg = f"Error during pull operation: {e}"
@@ -423,7 +425,9 @@ class DockerManager:
             return {
                 "success": False,
                 "error": error_msg,
-                "output": "\n".join(stdout_lines) if "stdout_lines" in locals() else "",  # pyright: ignore
+                "output": (
+                    "\n".join(stdout_lines) if "stdout_lines" in locals() else ""
+                ),  # pyright: ignore
             }
 
     def start_docker_services(self, yaml_content: dict) -> dict:
