@@ -24,6 +24,52 @@ class DockerManager:
         self.progress_reporter = progress_reporter
         self._completed_layers = set()
 
+    def login_docker_ecr(self, registry: str, username: str, password: str) -> bool:
+        """Login to an ECR private registry for pulling images.
+
+        Parameters
+        ----------
+        registry : str
+            ECR registry URL
+        username : str
+            Docker username
+        password : str
+            Temporary Docker password
+
+        Returns
+        -------
+        bool
+            True if login succeeded
+        """
+        if not all([registry, username, password]):
+            logging.error("ECR login failed: missing required parameters")
+            return False
+
+        try:
+            cmd = [
+                "docker",
+                "login",
+                "--username",
+                username,
+                "--password-stdin",
+                registry,
+            ]
+            result = subprocess.run(
+                cmd, input=password, capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0:
+                logging.info(f"ECR login successful: {registry}")
+                return True
+            else:
+                logging.error(f"ECR login failed for registry: {registry}")
+                return False
+        except subprocess.TimeoutExpired:
+            logging.error("ECR login timed out")
+            return False
+        except Exception as e:
+            logging.error(f"ECR login error: {e}")
+            return False
+
     def stop_docker_services(self, yaml_content: dict) -> dict:
         """
         Stop Docker containers/services based on the update configuration.
@@ -345,7 +391,15 @@ class DockerManager:
                     "services_pulled": list(services_pulled),
                 }
             else:
-                error_msg = f"Pull failed with return code {return_code}: {stderr_text}"
+                if (
+                    "pull access denied" in stdout_text
+                    and "authorization failed" in stdout_text
+                ):
+                    error_msg = "This service requires an Enterprise plan for private image access. Please upgrade your plan at https://portal.openmind.com"
+                else:
+                    error_msg = (
+                        f"Pull failed with return code {return_code}: {stdout_text}"
+                    )
                 logging.error(error_msg)
                 return {
                     "success": False,
@@ -355,13 +409,15 @@ class DockerManager:
                 }
 
         except subprocess.TimeoutExpired:
-            process.kill()
+            process.kill()  # pyright: ignore
             error_msg = "Docker pull operation timed out"
             logging.error(error_msg)
             return {
                 "success": False,
                 "error": error_msg,
-                "output": "\n".join(stdout_lines) if "stdout_lines" in locals() else "",
+                "output": (
+                    "\n".join(stdout_lines) if "stdout_lines" in locals() else ""
+                ),  # pyright: ignore
             }
         except Exception as e:
             error_msg = f"Error during pull operation: {e}"
@@ -369,7 +425,9 @@ class DockerManager:
             return {
                 "success": False,
                 "error": error_msg,
-                "output": "\n".join(stdout_lines) if "stdout_lines" in locals() else "",
+                "output": (
+                    "\n".join(stdout_lines) if "stdout_lines" in locals() else ""
+                ),  # pyright: ignore
             }
 
     def start_docker_services(self, yaml_content: dict) -> dict:

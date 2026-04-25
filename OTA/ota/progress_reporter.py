@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 from typing import Optional
@@ -40,7 +41,7 @@ class ProgressReporter:
                 "status": status,
                 "message": message,
                 "progress": progress,
-                "timestamp": json.dumps(None),
+                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
             try:
                 self.ws_client.send_message(json.dumps(update_data))

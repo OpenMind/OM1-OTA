@@ -2,6 +2,7 @@ import logging
 
 from ..utils.s3_utils import S3FileDownloader
 from .docker_operations import DockerManager
+from .ecr_handler import ECRHandler
 from .file_manager import FileManager
 from .progress_reporter import ProgressReporter
 
@@ -32,6 +33,7 @@ class ActionHandlers:
         self.docker_manager = docker_manager
         self.progress_reporter = progress_reporter
         self.file_manager = file_manager
+        self.ecr_handler = ECRHandler(docker_manager, progress_reporter)
 
     def handle_upgrade_action(self, data: dict, service_name: str = ""):
         """
@@ -171,6 +173,10 @@ class ActionHandlers:
             if env_variables is None:
                 env_variables = s3_downloader.get_default_env(service_name, tag)
             self.file_manager.update_env_file(service_name, tag, env_variables)
+
+            ecr_image = self.ecr_handler.check_image_privacy(yaml_content)
+            if ecr_image and not self.ecr_handler.login_with_credentials(ecr_image):
+                return
 
             start_result = self.docker_manager.start_docker_services(yaml_content)  # type: ignore
 
@@ -376,6 +382,10 @@ class ActionHandlers:
                 error_msg = f"Failed to stop Docker services: {stop_result.get('error', 'Unknown error')}"
                 logging.error(error_msg)
                 self.progress_reporter.send_progress_update("error", error_msg, 10)
+                return False
+
+            ecr_image = self.ecr_handler.check_image_privacy(yaml_content)
+            if ecr_image and not self.ecr_handler.login_with_credentials(ecr_image):
                 return False
 
             self.progress_reporter.send_progress_update(
