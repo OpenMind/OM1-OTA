@@ -15,18 +15,40 @@ OM_API_KEY = os.getenv("OM_API_KEY")
 
 
 class ECRHandler:
-    """Handles ECR credential requests and docker login for private images."""
+    """Handles ECR credential requests and Docker login for private images."""
 
     def __init__(
         self,
         docker_manager: DockerManager,
         progress_reporter: ProgressReporter,
     ):
+        """
+        Initialize the ECRHandler.
+
+        Parameters
+        ----------
+        docker_manager : DockerManager
+            Manager for executing Docker CLI commands
+        progress_reporter : ProgressReporter
+            Reporter for sending progress updates
+        """
         self.docker_manager = docker_manager
         self.progress_reporter = progress_reporter
 
     def check_image_privacy(self, yaml_content: dict | None) -> str | None:
-        """Return ECR repo name if any service uses a private ECR image, else None."""
+        """
+        Check if any service in the YAML configuration uses a private ECR image.
+
+        Parameters
+        ----------
+        yaml_content : dict
+            The parsed docker-compose YAML content
+
+        Returns
+        -------
+        str
+            The extracted ECR repository name, else None
+        """
         if not yaml_content:
             return None
         for svc in yaml_content.get("services", {}).values():
@@ -43,7 +65,19 @@ class ECRHandler:
         return None
 
     def login_with_credentials(self, image: str) -> bool:
-        """Fetch ECR credentials via HTTP and perform docker login."""
+        """
+        Fetch ECR credentials and perform Docker login.
+
+        Parameters
+        ----------
+        image : str
+            The name of the ECR repository
+
+        Returns
+        -------
+        bool
+            True if the login was successful, False otherwise
+        """
         if not ECR_CREDENTIALS_URL or not OM_API_KEY:
             logging.error("ECR_CREDENTIALS_URL or OM_API_KEY not configured")
             self.progress_reporter.send_progress_update(
