@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Optional
 
 import requests
 
@@ -35,18 +36,18 @@ class ECRHandler:
         self.docker_manager = docker_manager
         self.progress_reporter = progress_reporter
 
-    def check_image_privacy(self, yaml_content: dict | None) -> str | None:
+    def check_image_privacy(self, yaml_content: Optional[dict]) -> Optional[str]:
         """
         Check if any service in the YAML configuration uses a private ECR image.
 
         Parameters
         ----------
-        yaml_content : dict
+        yaml_content : Optional
             The parsed docker-compose YAML content
 
         Returns
         -------
-        str
+        Optional
             The extracted ECR repository name, else None
         """
         if not yaml_content:
