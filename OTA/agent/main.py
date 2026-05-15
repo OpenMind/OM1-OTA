@@ -59,6 +59,7 @@ class AgentOTA(BaseOTA):
             "person_following": "Person Following container for managing person following capabilities",
             "text_embedding": "Text Embedding container for generating text embeddings for AI processing",
             "functiongemma": "FunctionGemma container for executing function calls in the local environment",
+            "om1_telemetry": "OM1 Telemetry container for collecting telemetry data",
         }
 
         self.container_info_thread: Optional[threading.Thread] = None
