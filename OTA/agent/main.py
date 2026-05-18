@@ -60,7 +60,8 @@ class AgentOTA(BaseOTA):
             "text_embedding": "Text Embedding container for generating text embeddings for AI processing",
             "functiongemma": "FunctionGemma container for executing function calls in the local environment",
             "om1_telemetry": "OM1 Telemetry container for collecting telemetry data",
-            "grafana": "Grafana containers for visualizing telemetry data",
+            "grafana": "Grafana container for visualizing telemetry data",
+            "prometheus": "Prometheus container for data collection and monitoring",
         }
 
         self.container_info_thread: Optional[threading.Thread] = None
