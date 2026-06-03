@@ -1,5 +1,7 @@
 import json
 import logging
+import threading
+from queue import Queue
 from typing import Callable, Optional
 
 from ..utils.ws_client import WebSocketClient
@@ -48,6 +50,12 @@ class BaseOTA:
 
         self.ota_process_callback: Optional[Callable] = None
 
+        self.action_queue: Queue = Queue()
+        self.worker_thread = threading.Thread(
+            target=self.process_action_queue, daemon=True
+        )
+        self.worker_thread.start()
+
     def create_ws_client(self) -> WebSocketClient:
         """
         Factory function to create a WebSocketClient instance.
@@ -63,7 +71,7 @@ class BaseOTA:
 
     def ota_process(self, message: str, ws_client=None):
         """
-        Process OTA messages received from the WebSocket server.
+        Enqueue an OTA message for asynchronous processing.
 
         Parameters
         ----------
@@ -75,6 +83,30 @@ class BaseOTA:
         if ws_client:
             self.progress_reporter.set_ws_client(ws_client)
 
+        self.action_queue.put(message)
+
+    def process_action_queue(self):
+        """
+        Drain the OTA action queue, processing one message at a time.
+        """
+        while True:
+            message = self.action_queue.get()
+            try:
+                self.process_message(message)
+            except Exception as e:
+                logging.error(f"Unexpected error while processing OTA message: {e}")
+            finally:
+                self.action_queue.task_done()
+
+    def process_message(self, message: str):
+        """
+        Process a single OTA message (runs on the worker thread).
+
+        Parameters
+        ----------
+        message : str
+            The message received from the WebSocket server.
+        """
         if isinstance(message, str):
             logging.info(f"Received OTA message: {message}")
             try:
