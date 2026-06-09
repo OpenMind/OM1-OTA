@@ -18,7 +18,7 @@ services:
       - /usr/local/bin/docker-compose:/usr/local/bin/docker-compose:ro
       - ./.ota:/app/.ota
     network_mode: host
-    command: python -m OTA.agent.main
+    command: ["agent"]
     logging:
       driver: "json-file"
       options:
@@ -42,7 +42,7 @@ services:
       - /usr/local/bin/docker-compose:/usr/local/bin/docker-compose:ro
       - ./.ota:/app/.ota
     network_mode: host
-    command: python -m OTA.updater.main
+    command: ["updater"]
     logging:
       driver: "json-file"
       options:

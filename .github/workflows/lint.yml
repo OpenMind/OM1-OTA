@@ -14,35 +14,31 @@ jobs:
     steps:
     - uses: actions/checkout@v5
 
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v4
+    - name: Set up Go
+      uses: actions/setup-go@v5
       with:
-        python-version: '3.10'
+        go-version-file: 'go.mod'
+        cache: true
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v5
-
-    - name: "Set up Python"
-      uses: actions/setup-python@v5
-      with:
-        python-version-file: "pyproject.toml"
-
-    - name: Run Ruff
-      run: uv run ruff check .
-
-    - name: Run Black
-      run: uv run black --check .
-
-    - name: Run isort
-      run: uv run isort --check-only .
-
-    - name: Run Pyright
-      run: uv run pyright --project ./pyrightconfig.json
-
-    - name: Install pre-commit
-      run: pip install pre-commit
-
-    - name: Run pre-commit hooks
-      id: pre-commit
+    - name: Check formatting
       run: |
-        pre-commit run --all-files --show-diff-on-failure
+        unformatted=$(gofmt -l .)
+        if [ -n "$unformatted" ]; then
+          echo "The following files are not gofmt-formatted:"
+          echo "$unformatted"
+          exit 1
+        fi
+
+    - name: go vet
+      run: go vet ./...
+
+    - name: Build
+      run: go build ./...
+
+    - name: Test
+      run: go test ./...
+
+    - name: Verify go.mod is tidy
+      run: |
+        go mod tidy
+        git diff --exit-code go.mod go.sum
