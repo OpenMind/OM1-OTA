@@ -17,6 +17,8 @@ func main() {
 	serverURL := config.GetEnv("OTA_AGENT_SERVER_URL", "wss://api.openmind.com/api/core/ota/agent")
 	dockerStatusURL := config.GetEnv("DOCKER_STATUS_URL", "https://api.openmind.com/api/core/ota/agent/docker")
 	ecrCredentialsURL := config.GetEnv("ECR_CREDENTIALS_URL", "https://api.openmind.com/api/core/ota/ecr/credentials")
+	configSyncURL := config.GetEnv("CONFIG_SYNC_URL", "https://api.openmind.com/api/core/ota/config/manifest")
+	configDir := config.GetEnv("OM1_CONFIG_DIR", "/home/openmind/om1/om1/config")
 	apiKey := os.Getenv("OM_API_KEY")
 	apiKeyID := os.Getenv("OM_API_KEY_ID")
 
@@ -36,12 +38,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	a := agent.New(base, dockerStatusURL, apiKey)
+	a := agent.New(base, dockerStatusURL, apiKey, configSyncURL, configDir)
 
 	base.WS.RegisterMessageCallback(base.OTAProcess)
 	base.WS.Start()
 	a.Start()
 
-	// Block forever; background goroutines do the work.
 	select {}
 }

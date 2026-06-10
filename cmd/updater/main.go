@@ -37,6 +37,5 @@ func main() {
 	base.WS.RegisterMessageCallback(base.OTAProcess)
 	base.WS.Start()
 
-	// Block forever; background goroutines do the work.
 	select {}
 }

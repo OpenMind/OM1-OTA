@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,12 +17,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OpenMind/OM1-OTA/internal/configsync"
 	"github.com/OpenMind/OM1-OTA/internal/ota"
 )
 
 const (
 	infoFetchInterval    = 30 * time.Second
 	statusReportInterval = 5 * time.Second
+	configSyncInterval   = 5 * time.Minute
+	configSyncTimeout    = 2 * time.Minute
 	httpTimeout          = 10 * time.Second
 	dockerCmdTimeout     = 30 * time.Second
 )
@@ -61,6 +65,10 @@ type Agent struct {
 	descriptions map[string]string
 
 	httpClient *http.Client
+
+	// configSyncer keeps the local config directory in sync with S3. nil when
+	// config sync is not configured.
+	configSyncer *configsync.Syncer
 }
 
 // containerStatus is the per-container record reported to the server.
@@ -91,7 +99,7 @@ type psLine struct {
 }
 
 // New creates an Agent that reports to dockerStatusURL using apiKey.
-func New(base *ota.BaseOTA, dockerStatusURL, apiKey string) *Agent {
+func New(base *ota.BaseOTA, dockerStatusURL, apiKey, configManifestURL, configDir string) *Agent {
 	a := &Agent{
 		base:         base,
 		apiKey:       apiKey,
@@ -99,6 +107,9 @@ func New(base *ota.BaseOTA, dockerStatusURL, apiKey string) *Agent {
 		statusURL:    dockerStatusURL + "/status",
 		descriptions: cloneMap(defaultContainerDescriptions),
 		httpClient:   &http.Client{Timeout: httpTimeout},
+	}
+	if configManifestURL != "" && configDir != "" {
+		a.configSyncer = configsync.New(configManifestURL, apiKey, configDir)
 	}
 	base.SetProcessCallback(a.reportStatusOnce)
 	return a
@@ -115,6 +126,40 @@ func (a *Agent) Start() {
 	go a.reportStatusLoop()
 	slog.Info("Started periodic Docker container info fetching", "interval", infoFetchInterval)
 	slog.Info("Started periodic Docker container status reporting", "interval", statusReportInterval)
+	if a.configSyncer != nil {
+		go a.syncConfigLoop()
+		slog.Info("Started periodic config sync", "interval", configSyncInterval)
+	}
+}
+
+// syncConfigLoop syncs config files immediately and then on a fixed interval.
+func (a *Agent) syncConfigLoop() {
+	if !a.syncConfigOnce() {
+		return
+	}
+	ticker := time.NewTicker(configSyncInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		if !a.syncConfigOnce() {
+			return
+		}
+	}
+}
+
+// syncConfigOnce runs a single sync pass.
+func (a *Agent) syncConfigOnce() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), configSyncTimeout)
+	defer cancel()
+
+	err := a.configSyncer.Sync(ctx)
+	switch {
+	case errors.Is(err, configsync.ErrForbidden):
+		slog.Info("Config sync not enabled for this account; stopping config sync loop")
+		return false
+	case err != nil:
+		slog.Error("Config sync failed", "error", err)
+	}
+	return true
 }
 
 // fetchInfoLoop periodically refreshes the managed-container descriptions.
