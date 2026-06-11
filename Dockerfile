@@ -1,23 +1,36 @@
-FROM python:3.10-slim
+# syntax=docker/dockerfile:1
 
-RUN python3 -m pip install --upgrade pip
+# --- build stage ---
+FROM golang:1.25-bookworm AS build
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+WORKDIR /src
 
-WORKDIR /app
+# Cache dependencies first.
+COPY go.mod go.sum ./
+RUN go mod download
+
 COPY . .
 
-RUN uv venv /app/.venv && \
-    uv pip install -r pyproject.toml
+# Build both static binaries.
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/agent   ./cmd/agent && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/updater ./cmd/updater
 
-ENV VIRTUAL_ENV=/app/.venv
-ENV PATH="/app/.venv/bin:$PATH"
+# --- runtime stage ---
+# The agent shells out to the docker / docker-compose CLIs (mounted from the
+# host via docker-compose), so we only need a minimal base with CA certs.
+FROM debian:bookworm-slim
 
-RUN echo '#!/bin/bash' > /entrypoint.sh && \
-    echo 'set -e' >> /entrypoint.sh && \
-    echo 'echo "Starting OTA..."' >> /entrypoint.sh && \
-    echo 'exec "$@"' >> /entrypoint.sh && \
-    chmod +x /entrypoint.sh
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["python", "-m", "OTA.agent.main"]
+WORKDIR /app
+COPY --from=build /out/agent   /usr/local/bin/agent
+COPY --from=build /out/updater /usr/local/bin/updater
+
+# Default to the agent; docker-compose overrides the command for the updater.
+CMD ["agent"]

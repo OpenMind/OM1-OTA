@@ -1,113 +1,93 @@
 # OTA
 
-System setup tools for NVIDIA Orin devices with Over-The-Air (OTA) update capabilities.
+System setup tools for NVIDIA Orin devices with Over-The-Air (OTA) update
+capabilities, written in Go.
 
 ## Overview
 
-This project provides a comprehensive OTA (Over-The-Air) update system for NVIDIA Orin devices, enabling remote firmware updates, Docker container management, and system configuration updates. The system consists of two main components:
+This project provides an OTA update system for NVIDIA Orin devices, enabling
+remote Docker container management and system configuration updates. It consists
+of two binaries that hold a persistent WebSocket connection to the OpenMind API
+and execute remote commands against the local Docker daemon:
 
-- **OTA Agent**: Manages device-side updates including Docker containers and system files
-- **OTA Updater**: Handles self-updates of the OTA agent itself
+- **agent** – manages the device's containers and continuously reports their
+  status to the cloud.
+- **updater** – self-updates the OTA agent itself (same engine, different
+  WebSocket endpoint, no status reporting).
+
+Docker operations are performed by shelling out to the `docker` and
+`docker-compose` CLIs
 
 ## Features
 
-- 🔄 **OTA Updates**: Secure over-the-air updates for firmware and software
-- 🐳 **Docker Management**: Pull, update, and manage Docker containers remotely
-- 📁 **File Management**: Download and deploy configuration files from S3
-- 📊 **Progress Reporting**: Real-time update progress via WebSocket
-- 🔐 **Secure Authentication**: API key-based authentication with OpenMind API
-- 🏥 **Health Monitoring**: Container status tracking and reporting
-- 🔄 **Self-Updating**: OTA agent can update itself automatically
+- 🔄 Secure over-the-air container updates
+- 🐳 Pull, start, stop, pause, unpause, and restart Docker services remotely
+- 📁 Download and verify compose configs (SHA256) from S3 / HTTPS
+- 📊 Real-time progress reporting via WebSocket
+- 🔐 API-key authentication and short-lived private ECR credentials
+- 🏥 Periodic container status and image-digest reporting
+- 🔄 Self-updating agent
 
 ## Architecture
 
-### Components
-
 ```
-OTA/
-├── agent/          # OTA Agent - manages device updates
-│   ├── main.py     # Agent entry point
-│   └── README.md
-├── updater/        # OTA Updater - manages agent self-updates
-│   ├── main.py     # Updater entry point
-│   └── README.md
-├── ota/            # Core OTA functionality
-│   ├── ota.py              # Base OTA class
-│   ├── action_handlers.py  # Action handler implementations
-│   ├── docker_operations.py# Docker management
-│   ├── file_manager.py     # File operations
-│   └── progress_reporter.py# Progress tracking
-└── utils/          # Utility modules
-    ├── s3_utils.py         # S3 file operations
-    └── ws_client.py        # WebSocket client
-```
-
-### Managed Containers
-
-The OTA Agent manages the following Docker containers:
-- **om1**: Main container running the robot OS
-- **om1_sensor**: Sensor processing container handling sensor data
-- **orchestrator**: ROS2 Orchestrator service managing ROS2 nodes
-- **watchdog**: ROS2 Watchdog service monitoring system health
-
-## Installation
-
-### Prerequisites
-
-- Python 3.9 or higher
-- [uv](https://docs.astral.sh/uv/) - Fast Python package installer and resolver
-- Docker (for containerized deployment)
-- NVIDIA Orin device (for production deployment)
-
-Install `uv`:
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+OM1-OTA/
+├── cmd/
+│   ├── agent/      # agent entry point (status reporting + update engine)
+│   └── updater/    # updater entry point (update engine only)
+├── internal/
+│   ├── agent/      # AgentOTA: container status & info reporting
+│   ├── config/     # environment helpers
+│   ├── ota/        # core engine
+│   │   ├── ota.go          # BaseOTA: WS message dispatcher + wiring
+│   │   ├── actions.go      # action handlers (upgrade/start/stop/...)
+│   │   ├── docker.go       # docker / docker-compose operations
+│   │   ├── filemanager.go  # .ota state (compose yaml + env files)
+│   │   ├── ecr.go          # private ECR auth
+│   │   └── progress.go     # ota_progress WebSocket frames
+│   ├── s3/         # artifact download, checksum verify, schema
+│   └── ws/         # reconnecting WebSocket client
+├── Dockerfile
+├── docker-compose.yml
+└── go.mod
 ```
 
-### Install from Source
+### Managed containers
 
-1. Clone the repository:
-```bash
-git clone https://github.com/OpenMind/OM1-OTA.git
-cd OM1-OTA
-```
+The agent reports status for a built-in set of containers (om1, om1_sensor,
+orchestrator, watchdog, zenoh_bridge, grafana, prometheus, and others). The set
+can be refreshed at runtime from the server's `/info` endpoint.
 
-2. Create a virtual environment and install dependencies:
-```bash
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-uv pip install -e .
-```
+## Build
 
-### Install Development Dependencies
+Requires Go 1.25+.
 
 ```bash
-uv pip install -e ".[dev]"
-```
+# Build both binaries into ./bin
+go build -o bin/agent ./cmd/agent
+go build -o bin/updater ./cmd/updater
 
-### Quick Start with uv (Recommended)
-
-Alternatively, use `uv run` to automatically manage the virtual environment:
-
-```bash
-uv run python -m OTA.agent.main
+# Or build everything
+go build ./...
 ```
 
 ## Configuration
 
-### Environment Variables
+Configuration is provided via environment variables.
 
-The following environment variables must be set:
+### Agent
 
-#### OTA Agent
 ```bash
 export OM_API_KEY="your-api-key"
 export OM_API_KEY_ID="your-api-key-id"
 export OTA_AGENT_SERVER_URL="wss://api.openmind.com/api/core/ota/agent"
 export DOCKER_STATUS_URL="https://api.openmind.com/api/core/ota/agent/docker"
+# optional:
+export ECR_CREDENTIALS_URL="https://api.openmind.com/api/core/ota/ecr/credentials"
 ```
 
-#### OTA Updater
+### Updater
+
 ```bash
 export OM_API_KEY="your-api-key"
 export OM_API_KEY_ID="your-api-key-id"
@@ -116,129 +96,51 @@ export OTA_UPDATER_SERVER_URL="wss://api.openmind.com/api/core/ota/updater"
 
 ## Usage
 
-### Running the OTA Agent
-
 ```bash
-uv run python -m OTA.agent.main
+# Run the agent
+./bin/agent
+
+# Run the updater
+./bin/updater
 ```
 
 The agent will:
-1. Connect to the OTA server via WebSocket
-2. Listen for update commands
-3. Execute updates (Docker pulls, file downloads, etc.)
-4. Report progress back to the server
-
-### Running the OTA Updater
-
-```bash
-uv run python -m OTA.updater.main
-```
-
-The updater handles self-updates of the OTA agent.
+1. Connect to the OTA server via WebSocket.
+2. Listen for update commands.
+3. Execute updates (compose pulls, container lifecycle, file downloads).
+4. Report progress and container status back to the server.
 
 ## Docker Deployment
 
-### Build the Docker Image
-
 ```bash
+# Build the image
 docker build -t orin-ota-agent .
-```
 
-### Run with Docker Compose
-
-```bash
+# Run with Docker Compose (runs both agent and updater)
 docker-compose up -d
 ```
 
-### Run with Docker
-
-```bash
-docker run -d \
-  --name ota-agent \
-  -e OM_API_KEY=your-api-key \
-  -e OM_API_KEY_ID=your-api-key-id \
-  -e OTA_AGENT_SERVER_URL=wss://api.openmind.com/api/core/ota/agent \
-  -e DOCKER_STATUS_URL=https://api.openmind.com/api/core/ota/agent/docker \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  orin-ota-agent
-```
+The compose file mounts the host Docker socket and the host `docker` /
+`docker-compose` binaries into the containers so the Go binaries can drive the
+host's Docker daemon.
 
 ## Development
 
-### Code Formatting
-
-This project uses `black`, `isort`, and `ruff` for code formatting:
-
 ```bash
-# Format code
-uv run black .
-uv run isort .
+# Format
+gofmt -w .
 
-# Lint code
-uv run ruff check .
+# Static analysis
+go vet ./...
+
+# Tests
+go test ./...
+
+# Keep modules tidy
+go mod tidy
 ```
-
-### Type Checking
-
-```bash
-# Using mypy
-uv run mypy OTA/
-
-# Using pyright
-uv run pyright
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-uv run pytest
-
-# Run with coverage
-uv run pytest --cov=OTA tests/
-```
-
-### Pre-commit Hooks
-
-Install pre-commit hooks:
-```bash
-uv run pre-commit install
-```
-
-Run manually:
-```bash
-uv run pre-commit run --all-files
-```
-
-## Project Structure
-
-- `OTA/agent/`: OTA Agent implementation for device-side updates
-- `OTA/updater/`: OTA Updater for agent self-updates
-- `OTA/ota/`: Core OTA functionality and action handlers
-- `OTA/utils/`: Utility modules (S3, WebSocket)
-- `Dockerfile`: Container definition for deployment
-- `docker-compose.yml`: Docker Compose configuration
-- `pyproject.toml`: Project metadata and dependencies
-
-## API Integration
-
-The OTA system integrates with the OpenMind API for:
-- **Authentication**: API key-based secure access
-- **WebSocket Communication**: Real-time command and status updates
-- **Container Status Reporting**: Health and state monitoring
-- **Progress Tracking**: Update progress and completion status
-
-## Security
-
-- API keys must be kept secure and not committed to version control
-- WebSocket connections use secure WSS protocol
-- File downloads from S3 are verified before execution
-- Docker operations run with appropriate permissions
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Support
-
-For issues and questions, please contact the OpenMind team or create an issue in the repository.
+This project is licensed under the MIT License – see the [LICENSE](LICENSE) file
+for details.

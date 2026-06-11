@@ -1,6 +1,14 @@
-__pycache__
-.venv
-.ruff_cache
+# Build output
+/bin/
+*.exe
+*.test
+*.out
+
+# Runtime state (OTA cache)
 .ota
-*.egg-info
+
+# Local env
+.env
+
+# OS
 .DS_Store
