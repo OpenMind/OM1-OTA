@@ -3,10 +3,11 @@ package ota
 import (
 	"bufio"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"go.uber.org/zap"
 
 	"gopkg.in/yaml.v3"
 )
@@ -40,17 +41,17 @@ func (m *FileManager) StoreUpdateFiles(serviceName, tag, tempYAMLPath string) er
 	data, err := os.ReadFile(tempYAMLPath)
 	if err != nil {
 		err = fmt.Errorf("failed to store OTA update file: %w", err)
-		slog.Error(err.Error())
+		zap.S().Errorw(err.Error())
 		return err
 	}
 	for _, dst := range []string{versionPath, latestPath} {
 		if err := os.WriteFile(dst, data, 0o644); err != nil {
 			err = fmt.Errorf("failed to store OTA update file: %w", err)
-			slog.Error(err.Error())
+			zap.S().Errorw(err.Error())
 			return err
 		}
 	}
-	slog.Info("Stored OTA update files", "version", versionPath, "latest", latestPath)
+	zap.S().Infow("Stored OTA update files", "version", versionPath, "latest", latestPath)
 	return nil
 }
 
@@ -64,22 +65,21 @@ func (m *FileManager) LoadLatestConfig(serviceName string) (map[string]any, stri
 			return nil, "", fmt.Errorf("no stored configuration found for service %s", serviceName)
 		}
 		err = fmt.Errorf("failed to load latest configuration: %w", err)
-		slog.Error(err.Error())
+		zap.S().Errorw(err.Error())
 		return nil, "", err
 	}
 
 	var content map[string]any
 	if err := yaml.Unmarshal(data, &content); err != nil {
 		err = fmt.Errorf("failed to load latest configuration: %w", err)
-		slog.Error(err.Error())
+		zap.S().Errorw(err.Error())
 		return nil, "", err
 	}
-	slog.Info("Loaded latest configuration", "path", latestPath)
+	zap.S().Infow("Loaded latest configuration", "path", latestPath)
 	return content, latestPath, nil
 }
 
-// CleanupTempFile removes a temporary file, returning true on success (or if the
-// file does not exist).
+// CleanupTempFile removes a temporary file, returning true on success.
 func (m *FileManager) CleanupTempFile(path string) bool {
 	if path == "" {
 		return true
@@ -88,15 +88,14 @@ func (m *FileManager) CleanupTempFile(path string) bool {
 		if os.IsNotExist(err) {
 			return true
 		}
-		slog.Warn("Failed to clean up file", "path", path, "error", err)
+		zap.S().Warnw("Failed to clean up file", "path", path, "error", err)
 		return false
 	}
-	slog.Info("Cleaned up temporary file", "path", path)
+	zap.S().Infow("Cleaned up temporary file", "path", path)
 	return true
 }
 
-// UpdateEnvFile writes the given variables to {service}_{tag}.env as KEY=VALUE
-// lines.
+// UpdateEnvFile writes the given variables to {service}_{tag}.env as KEY=VALUE lines.
 func (m *FileManager) UpdateEnvFile(serviceName, tag string, variables map[string]string) error {
 	envPath := filepath.Join(m.updatesDir, fmt.Sprintf("%s_%s.env", serviceName, tag))
 
@@ -106,10 +105,10 @@ func (m *FileManager) UpdateEnvFile(serviceName, tag string, variables map[strin
 	}
 	if err := os.WriteFile(envPath, []byte(b.String()), 0o644); err != nil {
 		err = fmt.Errorf("failed to write env file %s: %w", envPath, err)
-		slog.Error(err.Error())
+		zap.S().Errorw(err.Error())
 		return err
 	}
-	slog.Info("Wrote env file", "service", serviceName, "tag", tag, "path", envPath)
+	zap.S().Infow("Wrote env file", "service", serviceName, "tag", tag, "path", envPath)
 	return nil
 }
 
@@ -139,7 +138,7 @@ func parseEnvFile(path string) map[string]string {
 		result[key] = value
 	}
 	if err := scanner.Err(); err != nil {
-		slog.Warn("Failed to parse env file", "path", path, "error", err)
+		zap.S().Warnw("Failed to parse env file", "path", path, "error", err)
 	}
 	return result
 }

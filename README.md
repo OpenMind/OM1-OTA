@@ -16,7 +16,7 @@ and execute remote commands against the local Docker daemon:
   WebSocket endpoint, no status reporting).
 
 Docker operations are performed by shelling out to the `docker` and
-`docker-compose` CLIs, matching the original Python implementation.
+`docker-compose` CLIs
 
 ## Features
 

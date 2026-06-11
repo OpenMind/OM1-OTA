@@ -1,12 +1,10 @@
-// Package ota implements the core OTA engine: it dispatches WebSocket commands
-// to Docker operations and reports progress. It is a port of the Python BaseOTA
-// and its collaborators.
 package ota
 
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
+
+	"go.uber.org/zap"
 
 	"github.com/OpenMind/OM1-OTA/internal/s3"
 	"github.com/OpenMind/OM1-OTA/internal/ws"
@@ -70,8 +68,7 @@ func New(opts Options) (*BaseOTA, error) {
 	}, nil
 }
 
-// buildWSURL appends the API credentials as query parameters, matching the
-// Python client's URL format.
+// buildWSURL appends the API credentials as query parameters
 func buildWSURL(opts Options) string {
 	return fmt.Sprintf("%s?api_key_id=%s&api_key=%s", opts.ServerURL, opts.APIKeyID, opts.APIKey)
 }
@@ -88,11 +85,11 @@ func (o *BaseOTA) Downloader() *s3.Downloader {
 
 // OTAProcess parses and dispatches a single inbound WebSocket message.
 func (o *BaseOTA) OTAProcess(message []byte) {
-	slog.Info("Received OTA message", "message", string(message))
+	zap.S().Infow("Received OTA message", "message", string(message))
 
 	var data map[string]any
 	if err := json.Unmarshal(message, &data); err != nil {
-		slog.Error("Failed to decode JSON message", "error", err)
+		zap.S().Errorw("Failed to decode JSON message", "error", err)
 		o.Progress.SendProgressUpdate("decode_error", "Failed to decode message", 0)
 		o.runCallback(message)
 		return
@@ -102,15 +99,15 @@ func (o *BaseOTA) OTAProcess(message []byte) {
 	serviceName := getString(data, "service_name")
 
 	if action == "" {
-		slog.Error("Invalid OTA message: missing action")
+		zap.S().Errorw("Invalid OTA message: missing action")
 		return
 	}
 	if serviceName == "" {
-		slog.Error("Invalid OTA message: missing service_name")
+		zap.S().Errorw("Invalid OTA message: missing service_name")
 		return
 	}
 
-	slog.Info("Processing action", "action", action, "service", serviceName)
+	zap.S().Infow("Processing action", "action", action, "service", serviceName)
 
 	switch action {
 	case "upgrade":
@@ -127,7 +124,7 @@ func (o *BaseOTA) OTAProcess(message []byte) {
 		o.Actions.HandleRestart(data, serviceName)
 	default:
 		msg := fmt.Sprintf("Unknown action type: %s. Supported actions: upgrade, stop, start, pause, unpause, restart", action)
-		slog.Error(msg)
+		zap.S().Errorw(msg)
 		o.Progress.SendProgressUpdate("error", msg, 0)
 	}
 

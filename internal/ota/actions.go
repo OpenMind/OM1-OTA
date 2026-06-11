@@ -2,7 +2,8 @@ package ota
 
 import (
 	"fmt"
-	"log/slog"
+
+	"go.uber.org/zap"
 
 	"github.com/OpenMind/OM1-OTA/internal/s3"
 )
@@ -34,29 +35,29 @@ func (a *ActionHandlers) HandleUpgrade(data map[string]any, serviceName string) 
 	checksum := getString(data, "checksum")
 
 	if tag == "" || s3URL == "" || checksum == "" {
-		slog.Error("Invalid upgrade message: missing required fields (tag, s3_url, checksum)")
+		zap.S().Errorw("Invalid upgrade message: missing required fields (tag, s3_url, checksum)")
 		a.progress.SendProgressUpdate("error", "Missing required fields for upgrade action", 0)
 		return
 	}
 
-	slog.Info("OTA upgrade details", "tag", tag, "s3_url", s3URL, "checksum", checksum, "service", serviceName)
+	zap.S().Infow("OTA upgrade details", "tag", tag, "s3_url", s3URL, "checksum", checksum, "service", serviceName)
 
 	yamlContent, localPath, err := a.downloader.DownloadAndVerifyYAML(s3URL, checksum, "sha256")
 	if err != nil {
-		slog.Error("Failed to download or verify YAML file from S3", "error", err)
+		zap.S().Errorw("Failed to download or verify YAML file from S3", "error", err)
 		a.progress.SendProgressUpdate("download_error", "Failed to download or verify YAML file from S3", 0)
 		return
 	}
 
-	slog.Info("Successfully downloaded and verified YAML file", "path", localPath)
+	zap.S().Infow("Successfully downloaded and verified YAML file", "path", localPath)
 
 	if err := a.downloader.DownloadSchema(tag); err != nil {
-		slog.Warn("Failed to download schema", "error", err)
+		zap.S().Warnw("Failed to download schema", "error", err)
 	}
 
 	env := a.resolveEnv(data, serviceName, tag)
 	if err := a.files.UpdateEnvFile(serviceName, tag, env); err != nil {
-		slog.Warn("Failed to update env file", "error", err)
+		zap.S().Warnw("Failed to update env file", "error", err)
 	}
 
 	a.applyOTAUpdate(serviceName, yamlContent, localPath, tag)
@@ -66,7 +67,7 @@ func (a *ActionHandlers) HandleUpgrade(data map[string]any, serviceName string) 
 
 // HandleStop stops and removes a single service's container.
 func (a *ActionHandlers) HandleStop(data map[string]any, serviceName string) {
-	slog.Info("Stopping service", "service", serviceName)
+	zap.S().Infow("Stopping service", "service", serviceName)
 	a.progress.SendProgressUpdate("stopping", "Stopping service "+serviceName, 10)
 
 	cn := getString(data, "container_name")
@@ -81,17 +82,17 @@ func (a *ActionHandlers) HandleStop(data map[string]any, serviceName string) {
 
 	if err := a.docker.StopDockerServices(servicesConfig); err != nil {
 		msg := fmt.Sprintf("Failed to stop service %s: %v", serviceName, err)
-		slog.Error(msg)
+		zap.S().Errorw(msg)
 		a.progress.SendProgressUpdate("error", msg, 10)
 		return
 	}
-	slog.Info("Successfully stopped service", "service", serviceName)
+	zap.S().Infow("Successfully stopped service", "service", serviceName)
 	a.progress.SendProgressUpdate("completed", "Successfully stopped service "+serviceName, 100)
 }
 
 // HandleStart starts a service from provided or stored config.
 func (a *ActionHandlers) HandleStart(data map[string]any, serviceName string) {
-	slog.Info("Starting service", "service", serviceName)
+	zap.S().Infow("Starting service", "service", serviceName)
 	a.progress.SendProgressUpdate("starting", "Starting service "+serviceName, 10)
 
 	yamlContent, ok := a.resolveYAML(data, serviceName)
@@ -101,11 +102,11 @@ func (a *ActionHandlers) HandleStart(data map[string]any, serviceName string) {
 
 	tag := extractTagFromYAML(yamlContent)
 	if err := a.downloader.DownloadSchema(tag); err != nil {
-		slog.Warn("Failed to download schema", "error", err)
+		zap.S().Warnw("Failed to download schema", "error", err)
 	}
 	env := a.resolveEnv(data, serviceName, tag)
 	if err := a.files.UpdateEnvFile(serviceName, tag, env); err != nil {
-		slog.Warn("Failed to update env file", "error", err)
+		zap.S().Warnw("Failed to update env file", "error", err)
 	}
 
 	if ecrImage := a.ecr.CheckImagePrivacy(yamlContent); ecrImage != "" {
@@ -116,11 +117,11 @@ func (a *ActionHandlers) HandleStart(data map[string]any, serviceName string) {
 
 	if err := a.docker.StartDockerServices(yamlContent); err != nil {
 		msg := fmt.Sprintf("Failed to start service %s: %v", serviceName, err)
-		slog.Error(msg)
+		zap.S().Errorw(msg)
 		a.progress.SendProgressUpdate("error", msg, 80)
 		return
 	}
-	slog.Info("Successfully started service", "service", serviceName)
+	zap.S().Infow("Successfully started service", "service", serviceName)
 	a.progress.SendProgressUpdate("completed", "Successfully started service "+serviceName, 100)
 }
 
@@ -146,7 +147,7 @@ func (a *ActionHandlers) simpleAction(
 	errProgress int,
 	op func(map[string]any) error,
 ) {
-	slog.Info(gerund+" service", "service", serviceName)
+	zap.S().Infow(gerund+" service", "service", serviceName)
 	a.progress.SendProgressUpdate(statusVerb, fmt.Sprintf("%s service %s", gerund, serviceName), 10)
 
 	yamlContent, ok := a.resolveYAML(data, serviceName)
@@ -156,24 +157,24 @@ func (a *ActionHandlers) simpleAction(
 
 	if err := op(yamlContent); err != nil {
 		msg := fmt.Sprintf("Failed to %s service %s: %v", pastTense, serviceName, err)
-		slog.Error(msg)
+		zap.S().Errorw(msg)
 		a.progress.SendProgressUpdate("error", msg, errProgress)
 		return
 	}
-	slog.Info(fmt.Sprintf("Successfully %s service", pastTense), "service", serviceName)
+	zap.S().Infow(fmt.Sprintf("Successfully %s service", pastTense), "service", serviceName)
 	a.progress.SendProgressUpdate("completed", fmt.Sprintf("Successfully %s service %s", pastTense, serviceName), 100)
 }
 
 // applyOTAUpdate performs the stop -> ecr login -> store -> start sequence.
 func (a *ActionHandlers) applyOTAUpdate(serviceName string, yamlContent map[string]any, tempYAMLPath, tag string) bool {
-	slog.Info("Applying OTA update", "tag", tag)
+	zap.S().Infow("Applying OTA update", "tag", tag)
 	a.progress.SendProgressUpdate("starting", "Starting OTA update "+tag, 0)
 
-	slog.Info("Stopping current Docker services...")
+	zap.S().Infow("Stopping current Docker services...")
 	a.progress.SendProgressUpdate("stopping", "Stopping current Docker services", 10)
 	if err := a.docker.StopDockerServices(yamlContent); err != nil {
 		msg := fmt.Sprintf("Failed to stop Docker services: %v", err)
-		slog.Error(msg)
+		zap.S().Errorw(msg)
 		a.progress.SendProgressUpdate("error", msg, 10)
 		return false
 	}
@@ -186,27 +187,26 @@ func (a *ActionHandlers) applyOTAUpdate(serviceName string, yamlContent map[stri
 
 	a.progress.SendProgressUpdate("storing", "Storing update files", 20)
 	if err := a.files.StoreUpdateFiles(serviceName, tag, tempYAMLPath); err != nil {
-		slog.Error(err.Error())
+		zap.S().Errorw(err.Error())
 		a.progress.SendProgressUpdate("error", err.Error(), 20)
 		return false
 	}
 
-	slog.Info("Starting updated Docker services...")
+	zap.S().Infow("Starting updated Docker services...")
 	if err := a.docker.StartDockerServices(yamlContent); err != nil {
 		msg := fmt.Sprintf("Failed to start Docker services: %v", err)
-		slog.Error(msg)
+		zap.S().Errorw(msg)
 		a.progress.SendProgressUpdate("error", msg, 80)
 		return false
 	}
 
-	slog.Info("Successfully applied OTA update", "tag", tag)
+	zap.S().Infow("Successfully applied OTA update", "tag", tag)
 	a.progress.SendProgressUpdate("completed", "Successfully applied OTA update "+tag, 100)
 	return true
 }
 
 // resolveYAML returns the compose config from data["yaml_content"], or falls
-// back to the stored latest config. On total failure it emits an error progress
-// update and returns ok=false.
+// back to the stored latest config.
 func (a *ActionHandlers) resolveYAML(data map[string]any, serviceName string) (map[string]any, bool) {
 	if m, ok := getMap(data, "yaml_content"); ok && len(m) > 0 {
 		return m, true
@@ -215,11 +215,11 @@ func (a *ActionHandlers) resolveYAML(data map[string]any, serviceName string) (m
 	content, path, err := a.files.LoadLatestConfig(serviceName)
 	if err != nil {
 		msg := fmt.Sprintf("No YAML content provided and no stored configuration found for service %s", serviceName)
-		slog.Error(msg)
+		zap.S().Errorw(msg)
 		a.progress.SendProgressUpdate("error", msg, 10)
 		return nil, false
 	}
-	slog.Info("Loaded latest configuration", "path", path)
+	zap.S().Infow("Loaded latest configuration", "path", path)
 	return content, true
 }
 
@@ -258,8 +258,6 @@ func lastColon(s string) int {
 	}
 	return -1
 }
-
-// --- data extraction helpers ---
 
 func getString(data map[string]any, key string) string {
 	if v, ok := data[key].(string); ok {

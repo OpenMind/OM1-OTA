@@ -2,13 +2,12 @@ package ota
 
 import (
 	"encoding/json"
-	"log/slog"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
-// isoTimestampLayout matches Python's datetime.isoformat() for a UTC time,
-// e.g. "2026-06-09T12:00:00.000000+00:00".
 const isoTimestampLayout = "2006-01-02T15:04:05.000000-07:00"
 
 // wsSender is the subset of the WebSocket client used to emit progress frames.
@@ -44,20 +43,19 @@ func (p *ProgressReporter) SetWSClient(ws wsSender) {
 	p.mu.Unlock()
 }
 
-// SendProgressUpdate emits an ota_progress frame. It is a no-op (with a warning)
-// when no connected WebSocket client is available.
+// SendProgressUpdate emits an ota_progress frame.
 func (p *ProgressReporter) SendProgressUpdate(status, message string, progress int) {
 	p.mu.RLock()
 	ws := p.ws
 	p.mu.RUnlock()
 
 	if ws == nil {
-		slog.Warn("Cannot send progress update - no WebSocket client",
+		zap.S().Warnw("Cannot send progress update - no WebSocket client",
 			"status", status, "message", message, "progress", progress)
 		return
 	}
 	if !ws.IsConnected() {
-		slog.Warn("Cannot send progress update - WebSocket not connected",
+		zap.S().Warnw("Cannot send progress update - WebSocket not connected",
 			"status", status, "message", message, "progress", progress)
 		return
 	}
@@ -71,9 +69,9 @@ func (p *ProgressReporter) SendProgressUpdate(status, message string, progress i
 	}
 	payload, err := json.Marshal(frame)
 	if err != nil {
-		slog.Warn("Failed to encode progress update", "error", err)
+		zap.S().Warnw("Failed to encode progress update", "error", err)
 		return
 	}
 	ws.SendMessage(payload)
-	slog.Info("Sent progress update", "status", status, "message", message, "progress", progress)
+	zap.S().Infow("Sent progress update", "status", status, "message", message, "progress", progress)
 }

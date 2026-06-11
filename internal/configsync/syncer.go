@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // stateFileName is the local sync-state file stored inside the config dir.
@@ -33,7 +34,7 @@ type syncState struct {
 	Files map[string]fileState `json:"files"`
 }
 
-// manifestFile mirrors one entry of the server's manifest response.
+// manifestFile is one entry of the server's manifest response.
 type manifestFile struct {
 	Key  string `json:"key"`
 	ETag string `json:"etag"`
@@ -41,7 +42,7 @@ type manifestFile struct {
 	URL  string `json:"url"`
 }
 
-// manifest mirrors the server's GET /ota/config/manifest response body.
+// manifest is the server's GET /ota/config/manifest response body.
 type manifest struct {
 	Files       []manifestFile `json:"files"`
 	GeneratedAt string         `json:"generated_at"`
@@ -67,8 +68,7 @@ func New(manifestURL, apiKey, configDir string) *Syncer {
 	}
 }
 
-// Sync performs one sync pass: fetch the manifest, download new/changed files,
-// delete files removed upstream, and persist the updated state.
+// Sync runs one pass: fetch the manifest, download changed files, delete upstream-removed ones, and persist state.
 func (s *Syncer) Sync(ctx context.Context) error {
 	if err := os.MkdirAll(s.configDir, 0o755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
@@ -88,7 +88,7 @@ func (s *Syncer) Sync(ctx context.Context) error {
 		remote[f.Key] = f
 		dest, err := s.destPath(f.Key)
 		if err != nil {
-			slog.Warn("Skipping unsafe config key", "key", f.Key, "error", err)
+			zap.S().Warnw("Skipping unsafe config key", "key", f.Key, "error", err)
 			continue
 		}
 
@@ -100,12 +100,12 @@ func (s *Syncer) Sync(ctx context.Context) error {
 		}
 
 		if err := s.download(ctx, f.URL, dest); err != nil {
-			slog.Error("Failed to download config file", "key", f.Key, "error", err)
+			zap.S().Errorw("Failed to download config file", "key", f.Key, "error", err)
 			continue
 		}
 		state.Files[f.Key] = fileState{ETag: f.ETag, Size: f.Size}
 		downloaded++
-		slog.Info("Synced config file", "key", f.Key)
+		zap.S().Infow("Synced config file", "key", f.Key)
 	}
 
 	for key := range state.Files {
@@ -118,12 +118,12 @@ func (s *Syncer) Sync(ctx context.Context) error {
 			continue
 		}
 		if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
-			slog.Warn("Failed to remove stale config file", "key", key, "error", err)
+			zap.S().Warnw("Failed to remove stale config file", "key", key, "error", err)
 			continue
 		}
 		delete(state.Files, key)
 		deleted++
-		slog.Info("Removed stale config file", "key", key)
+		zap.S().Infow("Removed stale config file", "key", key)
 	}
 
 	if err := s.saveState(state); err != nil {
@@ -131,7 +131,7 @@ func (s *Syncer) Sync(ctx context.Context) error {
 	}
 
 	if downloaded > 0 || deleted > 0 {
-		slog.Info("Config sync complete", "downloaded", downloaded, "deleted", deleted, "total", len(man.Files))
+		zap.S().Infow("Config sync complete", "downloaded", downloaded, "deleted", deleted, "total", len(man.Files))
 	}
 	return nil
 }
@@ -203,8 +203,7 @@ func (s *Syncer) download(ctx context.Context, url, dest string) error {
 	return nil
 }
 
-// destPath resolves a manifest key to an absolute path inside configDir,
-// rejecting any key that would escape the directory (path traversal).
+// destPath resolves a manifest key to a path inside configDir, rejecting path traversal.
 func (s *Syncer) destPath(key string) (string, error) {
 	clean := filepath.Clean("/" + key) // anchor to root, collapses .. at the top
 	dest := filepath.Join(s.configDir, clean)
@@ -215,8 +214,7 @@ func (s *Syncer) destPath(key string) (string, error) {
 	return dest, nil
 }
 
-// loadState reads the sync-state file, returning an empty state if absent or
-// unreadable (so a corrupt state simply triggers a full re-sync).
+// loadState reads the sync-state file, returning an empty state if absent or unreadable.
 func (s *Syncer) loadState() syncState {
 	state := syncState{Files: map[string]fileState{}}
 	data, err := os.ReadFile(s.statePath)

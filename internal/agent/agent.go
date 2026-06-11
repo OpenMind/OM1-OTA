@@ -1,6 +1,3 @@
-// Package agent implements the device-side OTA agent: it manages container
-// updates (via the embedded BaseOTA engine) and periodically reports container
-// status to the server. It is a port of the Python AgentOTA.
 package agent
 
 import (
@@ -9,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/OpenMind/OM1-OTA/internal/configsync"
 	"github.com/OpenMind/OM1-OTA/internal/ota"
@@ -66,8 +64,6 @@ type Agent struct {
 
 	httpClient *http.Client
 
-	// configSyncer keeps the local config directory in sync with S3. nil when
-	// config sync is not configured.
 	configSyncer *configsync.Syncer
 }
 
@@ -124,11 +120,11 @@ func (a *Agent) Base() *ota.BaseOTA {
 func (a *Agent) Start() {
 	go a.fetchInfoLoop()
 	go a.reportStatusLoop()
-	slog.Info("Started periodic Docker container info fetching", "interval", infoFetchInterval)
-	slog.Info("Started periodic Docker container status reporting", "interval", statusReportInterval)
+	zap.S().Infow("Started periodic Docker container info fetching", "interval", infoFetchInterval)
+	zap.S().Infow("Started periodic Docker container status reporting", "interval", statusReportInterval)
 	if a.configSyncer != nil {
 		go a.syncConfigLoop()
-		slog.Info("Started periodic config sync", "interval", configSyncInterval)
+		zap.S().Infow("Started periodic config sync", "interval", configSyncInterval)
 	}
 }
 
@@ -154,18 +150,15 @@ func (a *Agent) syncConfigOnce() bool {
 	err := a.configSyncer.Sync(ctx)
 	switch {
 	case errors.Is(err, configsync.ErrForbidden):
-		slog.Info("Config sync not enabled for this account; stopping config sync loop")
+		zap.S().Infow("Config sync not enabled for this account; stopping config sync loop")
 		return false
 	case err != nil:
-		slog.Error("Config sync failed", "error", err)
+		zap.S().Errorw("Config sync failed", "error", err)
 	}
 	return true
 }
 
 // fetchInfoLoop periodically refreshes the managed-container descriptions.
-//
-// Note: the Python implementation only fetched once (a missing loop); this
-// implements the clearly-intended periodic refresh described by its log message.
 func (a *Agent) fetchInfoLoop() {
 	a.fetchDockerInfo()
 	ticker := time.NewTicker(infoFetchInterval)
@@ -178,20 +171,20 @@ func (a *Agent) fetchInfoLoop() {
 func (a *Agent) fetchDockerInfo() {
 	req, err := http.NewRequest(http.MethodGet, a.infoURL, nil)
 	if err != nil {
-		slog.Error("Failed to build Docker container info request", "error", err)
+		zap.S().Errorw("Failed to build Docker container info request", "error", err)
 		return
 	}
 	req.Header.Set("x-api-key", a.apiKey)
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		slog.Error("Failed to fetch Docker container info", "error", err)
+		zap.S().Errorw("Failed to fetch Docker container info", "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		slog.Error("Failed to fetch Docker container info", "status", resp.StatusCode)
+		zap.S().Errorw("Failed to fetch Docker container info", "status", resp.StatusCode)
 		return
 	}
 
@@ -199,7 +192,7 @@ func (a *Agent) fetchDockerInfo() {
 		ContainerInfo map[string]string `json:"container_info"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		slog.Error("Failed to decode Docker container info", "error", err)
+		zap.S().Errorw("Failed to decode Docker container info", "error", err)
 		return
 	}
 	if len(payload.ContainerInfo) > 0 {
@@ -232,12 +225,11 @@ func (a *Agent) reportStatus(context string) {
 	a.sendStatusToServer(status, context)
 }
 
-// readContainerStatus reads local container state via the Docker CLI. Returns
-// nil if the docker command itself fails.
+// readContainerStatus reads local container state via the Docker CLI.
 func (a *Agent) readContainerStatus() map[string]containerStatus {
 	out, err := runDocker(dockerCmdTimeout, "ps", "-a", "--format", "json")
 	if err != nil {
-		slog.Error("Failed to read local Docker container status", "error", err)
+		zap.S().Errorw("Failed to read local Docker container status", "error", err)
 		return nil
 	}
 
@@ -251,7 +243,7 @@ func (a *Agent) readContainerStatus() map[string]containerStatus {
 		}
 		var entry psLine
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			slog.Warn("Failed to parse container info", "error", err)
+			zap.S().Warnw("Failed to parse container info", "error", err)
 			continue
 		}
 		name := strings.TrimSpace(entry.Names)
@@ -291,10 +283,10 @@ func (a *Agent) readContainerStatus() map[string]containerStatus {
 			Present:      false,
 			EnvVariables: a.containerEnvVars(name, "latest"),
 		}
-		slog.Warn("Container is missing from local Docker", "container", name)
+		zap.S().Warnw("Container is missing from local Docker", "container", name)
 	}
 
-	slog.Info("Fetched container status", "found", len(found), "missing", missing)
+	zap.S().Infow("Fetched container status", "found", len(found), "missing", missing)
 	return status
 }
 
@@ -314,13 +306,12 @@ func (a *Agent) imageSHA256(imageName string) string {
 		}
 	}
 	if err != nil {
-		slog.Warn("Failed to get SHA256 for image", "image", imageName, "error", err)
+		zap.S().Warnw("Failed to get SHA256 for image", "image", imageName, "error", err)
 	}
 	return "unknown"
 }
 
-// containerEnvVars merges schema-filtered live env (docker inspect) with the
-// stored .env file. Live values take precedence.
+// containerEnvVars merges schema-filtered live env with the stored .env file, live values winning.
 func (a *Agent) containerEnvVars(containerName, imageName string) map[string]string {
 	tag := imageTag(imageName)
 
@@ -335,10 +326,10 @@ func (a *Agent) containerEnvVars(containerName, imageName string) map[string]str
 				}
 			}
 		} else {
-			slog.Warn("Failed to parse env vars via docker inspect", "container", containerName, "error", jsonErr)
+			zap.S().Warnw("Failed to parse env vars via docker inspect", "container", containerName, "error", jsonErr)
 		}
 	} else {
-		slog.Warn("Failed to get env vars via docker inspect", "container", containerName, "error", err)
+		zap.S().Warnw("Failed to get env vars via docker inspect", "container", containerName, "error", err)
 	}
 
 	containerEnv = a.filterEnvBySchema(containerEnv, imageName)
@@ -370,13 +361,13 @@ func (a *Agent) filterEnvBySchema(env map[string]string, imageName string) map[s
 func (a *Agent) sendStatusToServer(status map[string]containerStatus, context string) {
 	body, err := json.Marshal(map[string]any{"container_status": status})
 	if err != nil {
-		slog.Error("Failed to encode container status", "context", context, "error", err)
+		zap.S().Errorw("Failed to encode container status", "context", context, "error", err)
 		return
 	}
 
 	req, err := http.NewRequest(http.MethodPost, a.statusURL, bytes.NewReader(body))
 	if err != nil {
-		slog.Error("Failed to build container status request", "context", context, "error", err)
+		zap.S().Errorw("Failed to build container status request", "context", context, "error", err)
 		return
 	}
 	req.Header.Set("x-api-key", a.apiKey)
@@ -384,17 +375,17 @@ func (a *Agent) sendStatusToServer(status map[string]containerStatus, context st
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		slog.Error("Failed to report Docker container status", "context", context, "error", err)
+		zap.S().Errorw("Failed to report Docker container status", "context", context, "error", err)
 		return
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		slog.Error("Failed to report Docker container status", "context", context, "status", resp.StatusCode)
+		zap.S().Errorw("Failed to report Docker container status", "context", context, "status", resp.StatusCode)
 		return
 	}
-	slog.Info("Successfully reported Docker container status to server", "context", context)
+	zap.S().Infow("Successfully reported Docker container status to server", "context", context)
 }
 
 func (a *Agent) snapshotDescriptions() map[string]string {
@@ -402,8 +393,6 @@ func (a *Agent) snapshotDescriptions() map[string]string {
 	defer a.mu.RUnlock()
 	return cloneMap(a.descriptions)
 }
-
-// --- helpers ---
 
 // runDocker runs a docker subcommand with a timeout and returns combined stdout.
 func runDocker(timeout time.Duration, args ...string) (string, error) {

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"regexp"
@@ -14,10 +13,12 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"gopkg.in/yaml.v3"
 )
 
-// Regexes for parsing docker-compose pull output (ported from Python).
+// Regexes for parsing docker-compose pull output.
 var (
 	rePulling      = regexp.MustCompile(`^Pulling\s+(\w+)`)
 	rePullComplete = regexp.MustCompile(`^([a-f0-9]+)\s+Pull complete`)
@@ -34,6 +35,13 @@ type DockerManager struct {
 	completedLayers map[string]struct{}
 }
 
+type cmdResult struct {
+	stdout   string
+	stderr   string
+	code     int
+	timedOut bool
+}
+
 // NewDockerManager creates a DockerManager that reports progress via the given
 // reporter (which may be nil).
 func NewDockerManager(progress *ProgressReporter) *DockerManager {
@@ -46,24 +54,24 @@ func NewDockerManager(progress *ProgressReporter) *DockerManager {
 // LoginDockerECR logs in to a private ECR registry for pulling images.
 func (d *DockerManager) LoginDockerECR(registry, username, password string) bool {
 	if registry == "" || username == "" || password == "" {
-		slog.Error("ECR login failed: missing required parameters")
+		zap.S().Errorw("ECR login failed: missing required parameters")
 		return false
 	}
 	res, err := runCommand(30*time.Second, password,
 		"docker", "login", "--username", username, "--password-stdin", registry)
 	if err != nil {
-		slog.Error("ECR login error", "error", err)
+		zap.S().Errorw("ECR login error", "error", err)
 		return false
 	}
 	if res.timedOut {
-		slog.Error("ECR login timed out")
+		zap.S().Errorw("ECR login timed out")
 		return false
 	}
 	if res.code == 0 {
-		slog.Info("ECR login successful", "registry", registry)
+		zap.S().Infow("ECR login successful", "registry", registry)
 		return true
 	}
-	slog.Error("ECR login failed", "registry", registry)
+	zap.S().Errorw("ECR login failed", "registry", registry)
 	return false
 }
 
@@ -72,7 +80,7 @@ func (d *DockerManager) LoginDockerECR(registry, username, password string) bool
 func (d *DockerManager) StopDockerServices(compose map[string]any) error {
 	services := servicesMap(compose)
 	if len(services) == 0 {
-		slog.Warn("No services defined in update YAML")
+		zap.S().Warnw("No services defined in update YAML")
 		return nil
 	}
 
@@ -80,7 +88,7 @@ func (d *DockerManager) StopDockerServices(compose map[string]any) error {
 	for serviceName, cfg := range services {
 		cn := containerName(serviceName, cfg)
 		if err := d.stopOne(serviceName, cn, &stopped); err != nil {
-			slog.Error("Error stopping service", "service", serviceName, "error", err)
+			zap.S().Errorw("Error stopping service", "service", serviceName, "error", err)
 			failed = append(failed, serviceName)
 		}
 	}
@@ -88,12 +96,11 @@ func (d *DockerManager) StopDockerServices(compose map[string]any) error {
 	if len(failed) > 0 {
 		return fmt.Errorf("failed to stop services: %s", strings.Join(failed, ", "))
 	}
-	slog.Info("Stopped services", "count", len(stopped))
+	zap.S().Infow("Stopped services", "count", len(stopped))
 	return nil
 }
 
-// stopOne stops/removes a single container, escalating from graceful to forced
-// operations, mirroring the Python control flow.
+// stopOne stops/removes a single container, escalating from graceful to forced operations.
 func (d *DockerManager) stopOne(serviceName, cn string, stopped *[]string) error {
 	running, err := d.containerMatch(10*time.Second, "docker", "ps", "-q", "--filter", "name="+cn)
 	if err != nil {
@@ -106,57 +113,55 @@ func (d *DockerManager) stopOne(serviceName, cn string, stopped *[]string) error
 			return err
 		}
 		if stopRes.code == 0 {
-			slog.Info("Stopped container", "container", cn)
+			zap.S().Infow("Stopped container", "container", cn)
 			rmRes, err := runCommand(10*time.Second, "", "docker", "rm", cn)
 			if err != nil {
 				return err
 			}
 			if rmRes.code == 0 {
-				slog.Info("Removed container", "container", cn)
+				zap.S().Infow("Removed container", "container", cn)
 				*stopped = append(*stopped, cn)
 				return nil
 			}
-			slog.Warn("Normal remove failed, trying force remove", "container", cn)
+			zap.S().Warnw("Normal remove failed, trying force remove", "container", cn)
 			frRes, err := runCommand(10*time.Second, "", "docker", "rm", "-f", cn)
 			if err != nil {
 				return err
 			}
 			if frRes.code == 0 {
-				slog.Info("Force removed container", "container", cn)
+				zap.S().Infow("Force removed container", "container", cn)
 				*stopped = append(*stopped, cn)
 				return nil
 			}
 			return fmt.Errorf("failed to remove container %s: %s", cn, frRes.stderr)
 		}
 
-		// Graceful stop failed: try kill.
-		slog.Warn("Normal stop failed, trying force stop", "container", cn)
+		zap.S().Warnw("Normal stop failed, trying force stop", "container", cn)
 		killRes, err := runCommand(10*time.Second, "", "docker", "kill", cn)
 		if err != nil {
 			return err
 		}
 		if killRes.code == 0 {
-			slog.Info("Force stopped container", "container", cn)
+			zap.S().Infow("Force stopped container", "container", cn)
 			rmRes, err := runCommand(10*time.Second, "", "docker", "rm", "-f", cn)
 			if err != nil {
 				return err
 			}
 			if rmRes.code == 0 {
-				slog.Info("Removed container after force stop", "container", cn)
+				zap.S().Infow("Removed container after force stop", "container", cn)
 				*stopped = append(*stopped, cn)
 				return nil
 			}
 			return fmt.Errorf("failed to remove container after force stop %s: %s", cn, rmRes.stderr)
 		}
 		if strings.Contains(killRes.stderr, "No such container") {
-			slog.Info("Container no longer exists, considering as stopped", "container", cn)
+			zap.S().Infow("Container no longer exists, considering as stopped", "container", cn)
 			*stopped = append(*stopped, cn)
 			return nil
 		}
 		return fmt.Errorf("failed to force stop container %s: %s", cn, killRes.stderr)
 	}
 
-	// Not running: remove if a stopped container still exists.
 	exists, err := d.containerMatch(10*time.Second, "docker", "ps", "-a", "-q", "--filter", "name="+cn)
 	if err != nil {
 		return err
@@ -167,12 +172,12 @@ func (d *DockerManager) stopOne(serviceName, cn string, stopped *[]string) error
 			return err
 		}
 		if rmRes.code == 0 {
-			slog.Info("Removed stopped container", "container", cn)
+			zap.S().Infow("Removed stopped container", "container", cn)
 		} else {
-			slog.Warn("Failed to remove stopped container", "container", cn, "stderr", rmRes.stderr)
+			zap.S().Warnw("Failed to remove stopped container", "container", cn, "stderr", rmRes.stderr)
 		}
 	} else {
-		slog.Info("Container not found, considering as already stopped", "container", cn)
+		zap.S().Infow("Container not found, considering as already stopped", "container", cn)
 		*stopped = append(*stopped, serviceName)
 	}
 	return nil
@@ -182,7 +187,7 @@ func (d *DockerManager) stopOne(serviceName, cn string, stopped *[]string) error
 func (d *DockerManager) StartDockerServices(compose map[string]any) error {
 	services := servicesMap(compose)
 	if len(services) == 0 {
-		slog.Warn("No services defined in update YAML")
+		zap.S().Warnw("No services defined in update YAML")
 		return nil
 	}
 
@@ -192,21 +197,21 @@ func (d *DockerManager) StartDockerServices(compose map[string]any) error {
 	}
 	defer func() {
 		if rmErr := os.Remove(tempCompose); rmErr != nil && !os.IsNotExist(rmErr) {
-			slog.Warn("Failed to clean up temporary compose file", "error", rmErr)
+			zap.S().Warnw("Failed to clean up temporary compose file", "error", rmErr)
 		}
 	}()
 
-	slog.Info("Pulling Docker images...")
+	zap.S().Infow("Pulling Docker images...")
 	d.sendProgress("pulling", "Starting to pull Docker images", 30)
 
 	if err := d.pullImagesWithProgress(tempCompose); err != nil {
 		return fmt.Errorf("docker-compose pull failed: %w", err)
 	}
 
-	slog.Info("Successfully pulled Docker images")
+	zap.S().Infow("Successfully pulled Docker images")
 	d.sendProgress("pulled", "Successfully pulled Docker images", 70)
 
-	slog.Info("Starting Docker services...")
+	zap.S().Infow("Starting Docker services...")
 	d.sendProgress("starting_services", "Starting Docker services", 80)
 
 	upRes, err := runCommand(120*time.Second, "",
@@ -215,15 +220,15 @@ func (d *DockerManager) StartDockerServices(compose map[string]any) error {
 		return err
 	}
 	if upRes.timedOut {
-		slog.Error("Timeout starting Docker services")
+		zap.S().Errorw("Timeout starting Docker services")
 		return errors.New("timeout starting services")
 	}
 	if upRes.code != 0 {
-		slog.Error("Failed to start services", "stderr", upRes.stderr)
+		zap.S().Errorw("Failed to start services", "stderr", upRes.stderr)
 		return fmt.Errorf("docker-compose up failed: %s", upRes.stderr)
 	}
 
-	slog.Info("Successfully started services with docker-compose")
+	zap.S().Infow("Successfully started services with docker-compose")
 	d.cleanupOldImages()
 	return nil
 }
@@ -252,7 +257,7 @@ func (d *DockerManager) pullImagesWithProgress(composeFile string) error {
 		pr.Close()
 		return fmt.Errorf("start pull: %w", err)
 	}
-	pw.Close() // close parent's copy; reader gets EOF when the child exits
+	pw.Close()
 
 	var lines []string
 	scanner := bufio.NewScanner(pr)
@@ -261,7 +266,7 @@ func (d *DockerManager) pullImagesWithProgress(composeFile string) error {
 		line := strings.TrimSpace(scanner.Text())
 		lines = append(lines, line)
 		if line != "" {
-			slog.Info("Docker pull output", "line", line)
+			zap.S().Infow("Docker pull output", "line", line)
 			d.parsePullLine(line)
 		}
 	}
@@ -271,12 +276,12 @@ func (d *DockerManager) pullImagesWithProgress(composeFile string) error {
 	stdoutText := strings.Join(lines, "\n")
 
 	if ctx.Err() == context.DeadlineExceeded {
-		slog.Error("Docker pull operation timed out")
+		zap.S().Errorw("Docker pull operation timed out")
 		return errors.New("Docker pull operation timed out")
 	}
 
 	if waitErr == nil {
-		slog.Info("Successfully pulled all Docker images")
+		zap.S().Infow("Successfully pulled all Docker images")
 		return nil
 	}
 
@@ -286,7 +291,7 @@ func (d *DockerManager) pullImagesWithProgress(composeFile string) error {
 	} else {
 		msg = fmt.Sprintf("Pull failed: %s", stdoutText)
 	}
-	slog.Error(msg)
+	zap.S().Errorw(msg)
 	return errors.New(msg)
 }
 
@@ -332,14 +337,14 @@ func (d *DockerManager) createTempComposeFile(compose map[string]any) (string, e
 	if _, err := f.Write(data); err != nil {
 		return "", fmt.Errorf("write temp compose file: %w", err)
 	}
-	slog.Info("Created temporary docker-compose file", "path", f.Name())
+	zap.S().Infow("Created temporary docker-compose file", "path", f.Name())
 	return f.Name(), nil
 }
 
 // cleanupOldImages prunes unused Docker resources to free disk space. Failures
 // are logged but not fatal.
 func (d *DockerManager) cleanupOldImages() {
-	slog.Info("Cleaning up old Docker images...")
+	zap.S().Infow("Cleaning up old Docker images...")
 	d.sendProgress("cleanup", "Cleaning up old Docker images", 90)
 
 	cmds := []struct {
@@ -356,11 +361,11 @@ func (d *DockerManager) cleanupOldImages() {
 	for _, c := range cmds {
 		res, err := runCommand(60*time.Second, "", c.args[0], c.args[1:]...)
 		if err != nil {
-			slog.Warn("Error during cleanup", "command", c.name, "error", err)
+			zap.S().Warnw("Error during cleanup", "command", c.name, "error", err)
 			continue
 		}
 		if res.timedOut {
-			slog.Warn("Timeout during cleanup", "command", c.name)
+			zap.S().Warnw("Timeout during cleanup", "command", c.name)
 			continue
 		}
 		if res.code == 0 {
@@ -369,18 +374,18 @@ func (d *DockerManager) cleanupOldImages() {
 			if m := reReclaimed.FindStringSubmatch(out); m != nil {
 				spaceFreed = m[1]
 			}
-			slog.Info("Successfully cleaned up", "command", c.name)
+			zap.S().Infow("Successfully cleaned up", "command", c.name)
 		} else {
-			slog.Warn("Failed to cleanup", "command", c.name, "stderr", res.stderr)
+			zap.S().Warnw("Failed to cleanup", "command", c.name, "stderr", res.stderr)
 		}
 	}
 
 	if anySuccess {
 		msg := fmt.Sprintf("Cleaned up Docker resources. Space freed: %s", spaceFreed)
-		slog.Info(msg)
+		zap.S().Infow(msg)
 		d.sendProgress("cleanup_complete", msg, 95)
 	} else {
-		slog.Info("Cleanup completed but no space was freed")
+		zap.S().Infow("Cleanup completed but no space was freed")
 	}
 }
 
@@ -417,7 +422,7 @@ func (d *DockerManager) simpleServiceOp(
 ) error {
 	services := servicesMap(compose)
 	if len(services) == 0 {
-		slog.Warn("No services defined in YAML")
+		zap.S().Warnw("No services defined in YAML")
 		return nil
 	}
 
@@ -428,32 +433,32 @@ func (d *DockerManager) simpleServiceOp(
 
 		matched, err := d.containerMatch(10*time.Second, checkCmd[0], checkCmd[1:]...)
 		if err != nil {
-			slog.Error("Error during service op", "verb", verb, "service", serviceName, "error", err)
+			zap.S().Errorw("Error during service op", "verb", verb, "service", serviceName, "error", err)
 			failed = append(failed, serviceName)
 			continue
 		}
 		if !matched {
-			slog.Info(fmt.Sprintf("Container %s %s", cn, skipMsg))
+			zap.S().Infow(fmt.Sprintf("Container %s %s", cn, skipMsg))
 			continue
 		}
 
 		args := append(append([]string{}, action[1:]...), cn)
 		res, err := runCommand(actionTimeout, "", action[0], args...)
 		if err != nil {
-			slog.Error("Error during service op", "verb", verb, "service", serviceName, "error", err)
+			zap.S().Errorw("Error during service op", "verb", verb, "service", serviceName, "error", err)
 			failed = append(failed, serviceName)
 			continue
 		}
 		if res.timedOut {
-			slog.Error("Timeout during service op", "verb", verb, "service", serviceName)
+			zap.S().Errorw("Timeout during service op", "verb", verb, "service", serviceName)
 			failed = append(failed, serviceName)
 			continue
 		}
 		if res.code == 0 {
-			slog.Info("Service op succeeded", "verb", verb, "container", cn)
+			zap.S().Infow("Service op succeeded", "verb", verb, "container", cn)
 			done = append(done, cn)
 		} else {
-			slog.Error("Service op failed", "verb", verb, "container", cn, "stderr", res.stderr)
+			zap.S().Errorw("Service op failed", "verb", verb, "container", cn, "stderr", res.stderr)
 			failed = append(failed, cn)
 		}
 	}
@@ -461,7 +466,7 @@ func (d *DockerManager) simpleServiceOp(
 	if len(failed) > 0 {
 		return fmt.Errorf("failed to %s services: %s", verb, strings.Join(failed, ", "))
 	}
-	slog.Info("Service op completed", "verb", verb, "count", len(done))
+	zap.S().Infow("Service op completed", "verb", verb, "count", len(done))
 	return nil
 }
 
@@ -484,18 +489,7 @@ func (d *DockerManager) sendProgress(status, message string, progress int) {
 	}
 }
 
-// --- command runner & helpers ---
-
-type cmdResult struct {
-	stdout   string
-	stderr   string
-	code     int
-	timedOut bool
-}
-
-// runCommand executes a command with a timeout and optional stdin. A non-zero
-// exit status is reported via cmdResult.code (not as an error); err is non-nil
-// only for failures to launch the process.
+// runCommand executes a command with a timeout and optional stdin.
 func runCommand(timeout time.Duration, stdin, name string, args ...string) (cmdResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()

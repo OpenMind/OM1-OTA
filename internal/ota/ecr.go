@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // ECRHandler requests short-lived ECR credentials and performs docker login for
@@ -68,7 +69,7 @@ func (h *ECRHandler) CheckImagePrivacy(compose map[string]any) string {
 // login. Returns true on success.
 func (h *ECRHandler) LoginWithCredentials(image string) bool {
 	if h.credentialsURL == "" || h.apiKey == "" {
-		slog.Error("ECR_CREDENTIALS_URL or OM_API_KEY not configured")
+		zap.S().Errorw("ECR_CREDENTIALS_URL or OM_API_KEY not configured")
 		h.progress.SendProgressUpdate("error", "ECR credentials endpoint not configured", 15)
 		return false
 	}
@@ -78,7 +79,7 @@ func (h *ECRHandler) LoginWithCredentials(image string) bool {
 	body, _ := json.Marshal(map[string]string{"image": image})
 	req, err := http.NewRequest(http.MethodPost, h.credentialsURL, bytes.NewReader(body))
 	if err != nil {
-		slog.Error("ECR credentials request failed", "error", err)
+		zap.S().Errorw("ECR credentials request failed", "error", err)
 		h.progress.SendProgressUpdate("error", fmt.Sprintf("ECR credentials request failed: %v", err), 15)
 		return false
 	}
@@ -87,7 +88,7 @@ func (h *ECRHandler) LoginWithCredentials(image string) bool {
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		slog.Error("ECR credentials request failed", "error", err)
+		zap.S().Errorw("ECR credentials request failed", "error", err)
 		h.progress.SendProgressUpdate("error", fmt.Sprintf("ECR credentials request failed: %v", err), 15)
 		return false
 	}
@@ -97,25 +98,25 @@ func (h *ECRHandler) LoginWithCredentials(image string) bool {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		detail := extractErrorDetail(respBody)
-		slog.Error("ECR credentials error", "status", resp.StatusCode, "detail", detail)
+		zap.S().Errorw("ECR credentials error", "status", resp.StatusCode, "detail", detail)
 		h.progress.SendProgressUpdate("error", "ECR credentials error: "+detail, 15)
 		return false
 	}
 
 	var creds ecrCredentials
 	if err := json.Unmarshal(respBody, &creds); err != nil {
-		slog.Error("Failed to parse ECR credentials", "error", err)
+		zap.S().Errorw("Failed to parse ECR credentials", "error", err)
 		h.progress.SendProgressUpdate("error", "Failed to parse ECR credentials", 15)
 		return false
 	}
 
 	if !h.docker.LoginDockerECR(creds.Registry, creds.Username, creds.Password) {
-		slog.Error("Docker ECR login failed")
+		zap.S().Errorw("Docker ECR login failed")
 		h.progress.SendProgressUpdate("error", "Docker ECR login failed", 15)
 		return false
 	}
 
-	slog.Info("ECR login succeeded", "expires_at", creds.ExpiresAt)
+	zap.S().Infow("ECR login succeeded", "expires_at", creds.ExpiresAt)
 	return true
 }
 

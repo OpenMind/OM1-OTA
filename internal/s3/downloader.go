@@ -1,6 +1,3 @@
-// Package s3 downloads OTA artifacts (compose YAML, schema JSON) from S3 or
-// HTTPS URLs, verifies checksums, and exposes schema-derived env helpers. It is
-// a port of the Python S3FileDownloader.
 package s3
 
 import (
@@ -12,13 +9,14 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
@@ -42,8 +40,7 @@ type schemaEntry struct {
 	Env   map[string]any `json:"env"`
 }
 
-// NewDownloader creates a Downloader writing cached artifacts into updatesDir
-// (default ".ota" when empty).
+// NewDownloader creates a Downloader writing cached artifacts into updatesDir.
 func NewDownloader(updatesDir string) (*Downloader, error) {
 	if updatesDir == "" {
 		updatesDir = ".ota"
@@ -61,8 +58,7 @@ func NewDownloader(updatesDir string) (*Downloader, error) {
 	}, nil
 }
 
-// DownloadFile downloads s3Url to localPath. If localPath is empty a temp file
-// is created. It supports both s3:// and https:// URLs. Returns the local path.
+// DownloadFile downloads s3URL to localPath and returns the local path.
 func (d *Downloader) DownloadFile(s3URL, localPath string) (string, error) {
 	switch {
 	case strings.HasPrefix(s3URL, "s3://"):
@@ -98,7 +94,7 @@ func (d *Downloader) downloadWithS3(s3URL, localPath string) (string, error) {
 	}
 	client := awss3.NewFromConfig(cfg)
 
-	slog.Info("Downloading from S3", "bucket", bucket, "key", key, "dest", localPath)
+	zap.S().Infow("Downloading from S3", "bucket", bucket, "key", key, "dest", localPath)
 	out, err := client.GetObject(ctx, &awss3.GetObjectInput{Bucket: &bucket, Key: &key})
 	if err != nil {
 		_ = os.Remove(localPath)
@@ -122,7 +118,7 @@ func (d *Downloader) downloadWithHTTP(s3URL, localPath string) (string, error) {
 		}
 	}
 
-	slog.Info("Downloading via HTTP", "url", s3URL, "dest", localPath)
+	zap.S().Infow("Downloading via HTTP", "url", s3URL, "dest", localPath)
 	resp, err := d.httpClient.Get(s3URL)
 	if err != nil {
 		_ = os.Remove(localPath)
@@ -142,25 +138,22 @@ func (d *Downloader) downloadWithHTTP(s3URL, localPath string) (string, error) {
 	return localPath, nil
 }
 
-// VerifyChecksum reports whether the file at path matches expected (case
-// insensitive). algorithm is "sha256" (default) or "md5".
+// VerifyChecksum reports whether the file at path matches expected.
 func (d *Downloader) VerifyChecksum(path, expected, algorithm string) bool {
 	actual, err := fileChecksum(path, algorithm)
 	if err != nil {
-		slog.Error("Failed to calculate checksum", "path", path, "error", err)
+		zap.S().Errorw("Failed to calculate checksum", "path", path, "error", err)
 		return false
 	}
 	if strings.EqualFold(actual, expected) {
-		slog.Info("Checksum verification passed", "path", path)
+		zap.S().Infow("Checksum verification passed", "path", path)
 		return true
 	}
-	slog.Error("Checksum verification failed", "path", path, "expected", expected, "actual", actual)
+	zap.S().Errorw("Checksum verification failed", "path", path, "expected", expected, "actual", actual)
 	return false
 }
 
-// DownloadAndVerifyYAML downloads a YAML file, verifies its checksum, and parses
-// it. It returns the parsed content and the local path on success. On failure
-// the downloaded file is removed.
+// DownloadAndVerifyYAML downloads a YAML file, verifies its checksum, and parses it.
 func (d *Downloader) DownloadAndVerifyYAML(s3URL, expectedChecksum, algorithm string) (map[string]any, string, error) {
 	if algorithm == "" {
 		algorithm = "sha256"
@@ -187,12 +180,11 @@ func (d *Downloader) DownloadAndVerifyYAML(s3URL, expectedChecksum, algorithm st
 		return nil, "", fmt.Errorf("parse yaml: %w", err)
 	}
 
-	slog.Info("Successfully downloaded and verified YAML", "url", s3URL)
+	zap.S().Infow("Successfully downloaded and verified YAML", "url", s3URL)
 	return content, localPath, nil
 }
 
-// DownloadSchema downloads the schema.json for tag and caches it to
-// .ota/{tag}_schema.json.
+// DownloadSchema downloads and caches the schema.json for tag.
 func (d *Downloader) DownloadSchema(tag string) error {
 	schemaURL := fmt.Sprintf(schemaURLTemplate, tag)
 	cachePath := d.schemaCachePath(tag)
@@ -200,16 +192,14 @@ func (d *Downloader) DownloadSchema(tag string) error {
 	if _, err := d.DownloadFile(schemaURL, cachePath); err != nil {
 		return err
 	}
-	// Validate it parses, mirroring the Python behavior.
 	if _, err := d.loadSchema(tag); err != nil {
 		return err
 	}
-	slog.Info("Downloaded and cached schema", "path", cachePath)
+	zap.S().Infow("Downloaded and cached schema", "path", cachePath)
 	return nil
 }
 
-// GetDefaultEnv returns the schema-defined default env for a service/tag, or an
-// empty map if unavailable.
+// GetDefaultEnv returns the schema-defined default env for a service/tag.
 func (d *Downloader) GetDefaultEnv(serviceName, tag string) map[string]string {
 	schema, err := d.loadSchema(tag)
 	if err != nil {
@@ -221,13 +211,12 @@ func (d *Downloader) GetDefaultEnv(serviceName, tag string) map[string]string {
 	}
 	env := stringifyEnv(entry.Env)
 	if len(env) > 0 {
-		slog.Info("Using schema defaults", "service", serviceName, "tag", tag, "env", env)
+		zap.S().Infow("Using schema defaults", "service", serviceName, "tag", tag, "env", env)
 	}
 	return env
 }
 
-// GetSchemaEnvKeys returns the env keys declared for the service whose image
-// matches imageName, or nil if none match.
+// GetSchemaEnvKeys returns the env keys declared for the service whose image matches imageName.
 func (d *Downloader) GetSchemaEnvKeys(tag, imageName string) []string {
 	schema, err := d.loadSchema(tag)
 	if err != nil {
@@ -256,7 +245,7 @@ func (d *Downloader) loadSchema(tag string) (map[string]schemaEntry, error) {
 	}
 	var schema map[string]schemaEntry
 	if err := json.Unmarshal(data, &schema); err != nil {
-		slog.Error("Failed to read schema cache", "error", err)
+		zap.S().Errorw("Failed to read schema cache", "error", err)
 		return nil, err
 	}
 	return schema, nil
@@ -307,7 +296,6 @@ func tempFile() (string, error) {
 	return name, nil
 }
 
-// stringifyEnv converts schema env values to strings, matching Python's str().
 func stringifyEnv(in map[string]any) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
