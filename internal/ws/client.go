@@ -1,6 +1,8 @@
 package ws
 
 import (
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,7 +74,7 @@ func (c *Client) runLoop() {
 		}
 
 		c.setConn(conn)
-		zap.S().Infow("Connection established", "url", c.url)
+		zap.S().Infow("Connection established", "url", redactURL(c.url))
 
 		connDone := make(chan struct{})
 		go c.readLoop(conn, connDone)
@@ -212,6 +214,23 @@ func (c *Client) requeue(msg []byte) {
 	case c.sendCh <- msg:
 	default:
 	}
+}
+
+// redactURL masks sensitive query parameters so the URL is safe to log.
+func redactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<redacted>"
+	}
+	q := u.Query()
+	for key := range q {
+		switch strings.ToLower(key) {
+		case "api_key", "api_key_id", "token", "jwt_token", "password":
+			q.Set(key, "REDACTED")
+		}
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // sleepOrStop waits for d or until Stop is called. It returns true if stopped.

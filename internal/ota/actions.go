@@ -156,7 +156,7 @@ func (a *ActionHandlers) simpleAction(
 	}
 
 	if err := op(yamlContent); err != nil {
-		msg := fmt.Sprintf("Failed to %s service %s: %v", pastTense, serviceName, err)
+		msg := fmt.Sprintf("%s service %s failed: %v", gerund, serviceName, err)
 		zap.S().Errorw(msg)
 		a.progress.SendProgressUpdate("error", msg, errProgress)
 		return
