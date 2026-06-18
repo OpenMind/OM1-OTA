@@ -65,6 +65,49 @@ func (a *ActionHandlers) HandleUpgrade(data map[string]any, serviceName string) 
 	a.files.CleanupTempFile(localPath)
 }
 
+// HandleConfigUpdate applies a configuration update by stopping the service, updating env vars, and restarting it.
+func (a *ActionHandlers) HandleConfigUpdate(data map[string]any, serviceName string) {
+	zap.S().Infow("Updating configuration", "service", serviceName)
+	a.progress.SendProgressUpdate("starting", "Starting configuration update for "+serviceName, 0)
+
+	env, ok := envVariables(data)
+	if !ok {
+		zap.S().Errorw("Invalid update_config message: missing or empty env_variables")
+		a.progress.SendProgressUpdate("error", "Missing required field env_variables for update_config action", 0)
+		return
+	}
+
+	yamlContent, ok := a.resolveYAML(data, serviceName)
+	if !ok {
+		return
+	}
+
+	tag := extractTagFromYAML(yamlContent)
+	if err := a.files.UpdateEnvFile(serviceName, tag, env); err != nil {
+		zap.S().Warnw("Failed to update env file", "error", err)
+	}
+
+	zap.S().Infow("Stopping current Docker services...")
+	a.progress.SendProgressUpdate("stopping", "Stopping service "+serviceName, 40)
+	if err := a.docker.StopDockerServices(yamlContent); err != nil {
+		msg := fmt.Sprintf("Failed to stop service %s: %v", serviceName, err)
+		zap.S().Errorw(msg)
+		a.progress.SendProgressUpdate("error", msg, 40)
+		return
+	}
+
+	zap.S().Infow("Recreating Docker services with updated configuration...")
+	if err := a.docker.RecreateDockerServices(yamlContent); err != nil {
+		msg := fmt.Sprintf("Failed to recreate service %s: %v", serviceName, err)
+		zap.S().Errorw(msg)
+		a.progress.SendProgressUpdate("error", msg, 80)
+		return
+	}
+
+	zap.S().Infow("Successfully updated configuration", "service", serviceName)
+	a.progress.SendProgressUpdate("completed", "Successfully updated configuration for "+serviceName, 100)
+}
+
 // HandleStop stops and removes a single service's container.
 func (a *ActionHandlers) HandleStop(data map[string]any, serviceName string) {
 	zap.S().Infow("Stopping service", "service", serviceName)
@@ -257,6 +300,20 @@ func lastColon(s string) int {
 		}
 	}
 	return -1
+}
+
+// envVariables extracts a non-empty env_variables map from data. The bool is
+// false when the field is absent, null, the wrong type, or empty.
+func envVariables(data map[string]any) (map[string]string, bool) {
+	v, ok := data["env_variables"]
+	if !ok || v == nil {
+		return nil, false
+	}
+	m, ok := v.(map[string]any)
+	if !ok || len(m) == 0 {
+		return nil, false
+	}
+	return stringifyMap(m), true
 }
 
 func getString(data map[string]any, key string) string {
