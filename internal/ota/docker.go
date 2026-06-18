@@ -233,6 +233,45 @@ func (d *DockerManager) StartDockerServices(compose map[string]any) error {
 	return nil
 }
 
+// RecreateDockerServices recreates the services via docker-compose, without pulling.
+func (d *DockerManager) RecreateDockerServices(compose map[string]any) error {
+	services := servicesMap(compose)
+	if len(services) == 0 {
+		zap.S().Warnw("No services defined in update YAML")
+		return nil
+	}
+
+	tempCompose, err := d.createTempComposeFile(compose)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if rmErr := os.Remove(tempCompose); rmErr != nil && !os.IsNotExist(rmErr) {
+			zap.S().Warnw("Failed to clean up temporary compose file", "error", rmErr)
+		}
+	}()
+
+	zap.S().Infow("Recreating Docker services with updated configuration...")
+	d.sendProgress("starting_services", "Recreating Docker services", 80)
+
+	upRes, err := runCommand(120*time.Second, "",
+		"docker-compose", "-f", tempCompose, "up", "-d", "--no-build", "--force-recreate")
+	if err != nil {
+		return err
+	}
+	if upRes.timedOut {
+		zap.S().Errorw("Timeout recreating Docker services")
+		return errors.New("timeout recreating services")
+	}
+	if upRes.code != 0 {
+		zap.S().Errorw("Failed to recreate services", "stderr", upRes.stderr)
+		return fmt.Errorf("docker-compose up failed: %s", upRes.stderr)
+	}
+
+	zap.S().Infow("Successfully recreated services with docker-compose")
+	return nil
+}
+
 // pullImagesWithProgress runs `docker-compose -f <file> pull`, streaming output
 // and emitting progress updates parsed from the log lines.
 func (d *DockerManager) pullImagesWithProgress(composeFile string) error {

@@ -112,6 +112,8 @@ func (o *BaseOTA) OTAProcess(message []byte) {
 	switch action {
 	case "upgrade":
 		o.Actions.HandleUpgrade(data, serviceName)
+	case "update_config":
+		o.Actions.HandleConfigUpdate(data, serviceName)
 	case "stop":
 		o.Actions.HandleStop(data, serviceName)
 	case "start":
@@ -123,7 +125,7 @@ func (o *BaseOTA) OTAProcess(message []byte) {
 	case "restart":
 		o.Actions.HandleRestart(data, serviceName)
 	default:
-		msg := fmt.Sprintf("Unknown action type: %s. Supported actions: upgrade, stop, start, pause, unpause, restart", action)
+		msg := fmt.Sprintf("Unknown action type: %s. Supported actions: upgrade, update_config, stop, start, pause, unpause, restart", action)
 		zap.S().Errorw(msg)
 		o.Progress.SendProgressUpdate("error", msg, 0)
 	}
