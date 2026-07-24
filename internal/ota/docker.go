@@ -279,7 +279,7 @@ func (d *DockerManager) pullImagesWithProgress(composeFile string) error {
 	d.completedLayers = map[string]struct{}{}
 	d.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3600*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "docker-compose", "-f", composeFile, "pull")
