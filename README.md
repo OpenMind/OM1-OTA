@@ -89,7 +89,7 @@ Download the `terminal` binary:
 
 ```bash
 sudo mkdir -p /opt/om1/bin
-sudo curl -sL -o /opt/om1/bin/terminal https://assets.openmind.com/ota/terminal/1787172974/terminal-linux-arm64
+sudo curl -sL -o /opt/om1/bin/terminal "$(curl -s https://assets.openmind.com/ota/terminal/schema.json | jq -r '.builds["linux/arm64"].url')"
 sudo chmod +x /opt/om1/bin/terminal
 ```
 
