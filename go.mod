@@ -5,6 +5,7 @@ go 1.25.6
 require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.24
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.103.3
+	github.com/creack/pty v1.1.24
 	github.com/gorilla/websocket v1.5.3
 	go.uber.org/zap v1.28.0
 	gopkg.in/yaml.v3 v3.0.1

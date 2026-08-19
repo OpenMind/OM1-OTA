@@ -7,13 +7,18 @@ capabilities, written in Go.
 
 This project provides an OTA update system for NVIDIA Orin devices, enabling
 remote Docker container management and system configuration updates. It consists
-of two binaries that hold a persistent WebSocket connection to the OpenMind API
-and execute remote commands against the local Docker daemon:
+of two Docker-based binaries that hold a persistent WebSocket connection to the
+OpenMind API and execute remote commands against the local Docker daemon, plus
+one optional host-native binary:
 
 - **agent** – manages the device's containers and continuously reports their
   status to the cloud.
 - **updater** – self-updates the OTA agent itself (same engine, different
   WebSocket endpoint, no status reporting).
+- **terminal** – *(optional, host-native via systemd, not Docker)* gives a
+  real remote shell on the device itself rather than one scoped to a
+  container's namespaces. Fully independent of agent/updater; see
+  [Terminal (host-native, not Docker)](#terminal-host-native-not-docker).
 
 Docker operations are performed by shelling out to the `docker` and
 `docker-compose` CLIs
@@ -27,30 +32,8 @@ Docker operations are performed by shelling out to the `docker` and
 - 🔐 API-key authentication and short-lived private ECR credentials
 - 🏥 Periodic container status and image-digest reporting
 - 🔄 Self-updating agent
-
-## Architecture
-
-```
-OM1-OTA/
-├── cmd/
-│   ├── agent/      # agent entry point (status reporting + update engine)
-│   └── updater/    # updater entry point (update engine only)
-├── internal/
-│   ├── agent/      # AgentOTA: container status & info reporting
-│   ├── config/     # environment helpers
-│   ├── ota/        # core engine
-│   │   ├── ota.go          # BaseOTA: WS message dispatcher + wiring
-│   │   ├── actions.go      # action handlers (upgrade/start/stop/...)
-│   │   ├── docker.go       # docker / docker-compose operations
-│   │   ├── filemanager.go  # .ota state (compose yaml + env files)
-│   │   ├── ecr.go          # private ECR auth
-│   │   └── progress.go     # ota_progress WebSocket frames
-│   ├── s3/         # artifact download, checksum verify, schema
-│   └── ws/         # reconnecting WebSocket client
-├── Dockerfile
-├── docker-compose.yml
-└── go.mod
-```
+- 🖥️ Optional host-native remote terminal, self-updating, independent of the
+  Docker-based agent/updater
 
 ### Managed containers
 
@@ -63,9 +46,10 @@ can be refreshed at runtime from the server's `/info` endpoint.
 Requires Go 1.25+.
 
 ```bash
-# Build both binaries into ./bin
+# Build all three binaries into ./bin
 go build -o bin/agent ./cmd/agent
 go build -o bin/updater ./cmd/updater
+go build -o bin/terminal ./cmd/terminal
 
 # Or build everything
 go build ./...
@@ -94,6 +78,38 @@ export OM_API_KEY_ID="your-api-key-id"
 export OTA_UPDATER_SERVER_URL="wss://api.openmind.com/api/core/ota/updater"
 ```
 
+### Terminal (host-native, not Docker)
+
+`cmd/terminal` is a separate, minimal binary that provides remote terminal
+access. It's built to run **directly on the host via systemd**, not inside a
+container — `ota_agent`/`ota_updater` run in Docker, so a shell spawned from
+inside them would only ever see the container's own namespaces, not the real
+host. This binary is deliberately independent of `ota_agent`/`ota_updater`
+and requires no changes to either.
+
+> **Security note:** this binary runs as root and gives an unrestricted host
+> shell to anyone who can open a terminal session for this device through the
+> portal. Treat `OM_API_KEY` on a device running this service as equivalent
+> to a root credential.
+
+```bash
+export OM_API_KEY="your-api-key"
+export OM_API_KEY_ID="your-api-key-id"
+# optional:
+export TERMINAL_TRIGGER_SERVER_URL="wss://api.openmind.com/api/core/ota/updater"
+export TERMINAL_WS_URL="wss://api.openmind.com/api/core/v1/terminal/ws"
+export TERMINAL_SHELL="/bin/bash"
+export TERMINAL_UPDATE_MANIFEST_URL="https://assets.openmind.com/ota/terminal/schema.json"
+export TERMINAL_UPDATES_DIR="/var/lib/om1-terminal/updates"
+```
+
+It also self-updates: every 10 minutes (and once at startup) it checks
+`TERMINAL_UPDATE_MANIFEST_URL` for a build newer than the one it was compiled
+with, and if found, downloads, verifies, and atomically replaces its own
+binary, then exits so systemd (`Restart=always`) relaunches it. Install with
+the provided [`deploy/om1-terminal.service`](deploy/om1-terminal.service)
+unit file.
+
 ## Usage
 
 ```bash
@@ -102,6 +118,10 @@ export OTA_UPDATER_SERVER_URL="wss://api.openmind.com/api/core/ota/updater"
 
 # Run the updater
 ./bin/updater
+
+# Run the terminal agent (host-native — install via systemd instead in
+# production, see deploy/om1-terminal.service)
+./bin/terminal
 ```
 
 The agent will:

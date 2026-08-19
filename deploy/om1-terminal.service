@@ -1,0 +1,15 @@
+[Unit]
+Description=OM1 Remote Terminal Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/om1/terminal.env
+ExecStart=/opt/om1/bin/terminal
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -153,3 +153,107 @@ jobs:
               public.ecr.aws/b8k9c8n5/openmind/ota@${{ needs.build-amd64.outputs.image-digest }} \
               public.ecr.aws/b8k9c8n5/openmind/ota@${{ needs.build-arm64.outputs.image-digest }}
           done
+
+  build-terminal:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      matrix:
+        arch: [ amd64, arm64 ]
+    outputs:
+      build-timestamp: ${{ steps.ts.outputs.ts }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Compute build timestamp
+        id: ts
+        run: echo "ts=$(date -u +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: Build terminal binary
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} \
+            go build -trimpath -ldflags="-s -w -X github.com/OpenMind/OM1-OTA/internal/version.BuildTimestamp=${{ steps.ts.outputs.ts }}" \
+            -o terminal-linux-${{ matrix.arch }} ./cmd/terminal
+
+      - name: Compute checksum
+        id: sum
+        run: echo "sum=$(sha256sum terminal-linux-${{ matrix.arch }} | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload binary to S3
+        run: |
+          aws s3 cp terminal-linux-${{ matrix.arch }} \
+            s3://openmind-assets/ota/terminal/${{ steps.ts.outputs.ts }}/terminal-linux-${{ matrix.arch }}
+
+      - name: Write manifest fragment
+        run: |
+          cat <<EOF > manifest-${{ matrix.arch }}.json
+          {
+            "build_timestamp": "${{ steps.ts.outputs.ts }}",
+            "url": "https://assets.openmind.com/ota/terminal/${{ steps.ts.outputs.ts }}/terminal-linux-${{ matrix.arch }}",
+            "checksum": "${{ steps.sum.outputs.sum }}",
+            "checksum_algorithm": "sha256"
+          }
+          EOF
+
+      - name: Upload manifest fragment artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminal-manifest-${{ matrix.arch }}
+          path: manifest-${{ matrix.arch }}.json
+
+  publish-terminal-manifest:
+    runs-on: ubuntu-latest
+    needs: [ build-terminal ]
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download manifest fragments
+        uses: actions/download-artifact@v4
+        with:
+          pattern: terminal-manifest-*
+          merge-multiple: true
+
+      - name: Assemble schema.json
+        run: |
+          python3 - <<'PY'
+          import json, glob, datetime
+
+          builds = {}
+          for path in glob.glob("manifest-*.json"):
+              arch = path.removeprefix("manifest-").removesuffix(".json")
+              builds[f"linux/{arch}"] = json.load(open(path))
+
+          out = {
+              "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "builds": builds,
+          }
+          json.dump(out, open("schema.json", "w"), indent=2)
+          PY
+          cat schema.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload schema.json
+        run: |
+          aws s3 cp schema.json s3://openmind-assets/ota/terminal/schema.json \
+            --cache-control "no-cache" --content-type "application/json"
