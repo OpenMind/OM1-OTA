@@ -85,7 +85,10 @@ access. It's built to run **directly on the host via systemd**, not inside a
 container — `ota_agent`/`ota_updater` run in Docker, so a shell spawned from
 inside them would only ever see the container's own namespaces, not the real
 host. This binary is deliberately independent of `ota_agent`/`ota_updater`
-and requires no changes to either.
+and requires no changes to either. It holds a persistent connection to the
+cloud API's terminal-agent WebSocket (its own dedicated channel — nothing to
+do with the OTA agent/updater WebSockets) and is notified directly the
+moment the portal creates a session for it.
 
 > **Security note:** this binary runs as root and gives an unrestricted host
 > shell to anyone who can open a terminal session for this device through the
@@ -96,7 +99,7 @@ and requires no changes to either.
 export OM_API_KEY="your-api-key"
 export OM_API_KEY_ID="your-api-key-id"
 # optional:
-export TERMINAL_TRIGGER_SERVER_URL="wss://api.openmind.com/api/core/ota/updater"
+export TERMINAL_AGENT_URL="wss://api.openmind.com/api/core/v1/terminal/agent"
 export TERMINAL_WS_URL="wss://api.openmind.com/api/core/v1/terminal/ws"
 export TERMINAL_SHELL="/bin/bash"
 export TERMINAL_UPDATE_MANIFEST_URL="https://assets.openmind.com/ota/terminal/schema.json"

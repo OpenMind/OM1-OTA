@@ -22,7 +22,7 @@ func main() {
 	logger := logging.Init()
 	defer func() { _ = logger.Sync() }()
 
-	triggerServerURL := config.GetEnv("TERMINAL_TRIGGER_SERVER_URL", "wss://api.openmind.com/api/core/ota/updater")
+	terminalAgentURL := config.GetEnv("TERMINAL_AGENT_URL", "wss://api.openmind.com/api/core/v1/terminal/agent")
 	terminalWSURL := config.GetEnv("TERMINAL_WS_URL", "wss://api.openmind.com/api/core/v1/terminal/ws")
 	terminalShell := config.GetEnv("TERMINAL_SHELL", "/bin/bash")
 	manifestURL := config.GetEnv("TERMINAL_UPDATE_MANIFEST_URL", "https://assets.openmind.com/ota/terminal/schema.json")
@@ -37,7 +37,7 @@ func main() {
 
 	terminalMgr := terminal.NewManager(terminalWSURL, apiKey, terminalShell)
 
-	wsURL := triggerServerURL + "?api_key_id=" + apiKeyID + "&api_key=" + apiKey
+	wsURL := terminalAgentURL + "?api_key=" + apiKey
 	client := ws.NewClient(wsURL)
 	client.RegisterMessageCallback(func(message []byte) {
 		var data map[string]any
