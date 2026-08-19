@@ -1,27 +1,16 @@
 # OTA
 
-System setup tools for NVIDIA Orin devices with Over-The-Air (OTA) update
-capabilities, written in Go.
+System setup tools for NVIDIA Orin devices with Over-The-Air (OTA) update capabilities, written in Go.
 
 ## Overview
 
-This project provides an OTA update system for NVIDIA Orin devices, enabling
-remote Docker container management and system configuration updates. It consists
-of two Docker-based binaries that hold a persistent WebSocket connection to the
-OpenMind API and execute remote commands against the local Docker daemon, plus
-one optional host-native binary:
+This project provides an OTA update system for NVIDIA Orin devices, enabling remote Docker container management and system configuration updates. It consists of two Docker-based binaries that hold a persistent WebSocket connection to the OpenMind API and execute remote commands against the local Docker daemon, plus one optional host-native binary:
 
-- **agent** – manages the device's containers and continuously reports their
-  status to the cloud.
-- **updater** – self-updates the OTA agent itself (same engine, different
-  WebSocket endpoint, no status reporting).
-- **terminal** – *(optional, host-native via systemd, not Docker)* gives a
-  real remote shell on the device itself rather than one scoped to a
-  container's namespaces. Fully independent of agent/updater; see
-  [Terminal (host-native, not Docker)](#terminal-host-native-not-docker).
+- **agent** – manages the device's containers and continuously reports their status to the cloud.
+- **updater** – self-updates the OTA agent itself (same engine, different WebSocket endpoint, no status reporting).
+- **terminal** – *(optional, host-native via systemd, not Docker)* gives a real remote shell on the device itself rather than one scoped to a container's namespaces. Fully independent of agent/updater; see [Terminal (host-native, not Docker)](#terminal-host-native-not-docker).
 
-Docker operations are performed by shelling out to the `docker` and
-`docker-compose` CLIs
+Docker operations are performed by shelling out to the `docker` and `docker-compose` CLIs
 
 ## Features
 
@@ -32,14 +21,11 @@ Docker operations are performed by shelling out to the `docker` and
 - 🔐 API-key authentication and short-lived private ECR credentials
 - 🏥 Periodic container status and image-digest reporting
 - 🔄 Self-updating agent
-- 🖥️ Optional host-native remote terminal, self-updating, independent of the
-  Docker-based agent/updater
+- 🖥️ Optional host-native remote terminal, self-updating, independent of the Docker-based agent/updater
 
 ### Managed containers
 
-The agent reports status for a built-in set of containers (om1, om1_sensor,
-orchestrator, watchdog, zenoh_bridge, grafana, prometheus, and others). The set
-can be refreshed at runtime from the server's `/info` endpoint.
+The agent reports status for a built-in set of containers (om1, om1_sensor, orchestrator, watchdog, zenoh_bridge, grafana, prometheus, and others). The set can be refreshed at runtime from the server's `/info` endpoint.
 
 ## Build
 
@@ -80,20 +66,9 @@ export OTA_UPDATER_SERVER_URL="wss://api.openmind.com/api/core/ota/updater"
 
 ### Terminal (host-native, not Docker)
 
-`cmd/terminal` is a separate, minimal binary that provides remote terminal
-access. It's built to run **directly on the host via systemd**, not inside a
-container — `ota_agent`/`ota_updater` run in Docker, so a shell spawned from
-inside them would only ever see the container's own namespaces, not the real
-host. This binary is deliberately independent of `ota_agent`/`ota_updater`
-and requires no changes to either. It holds a persistent connection to the
-cloud API's terminal-agent WebSocket (its own dedicated channel — nothing to
-do with the OTA agent/updater WebSockets) and is notified directly the
-moment the portal creates a session for it.
+`cmd/terminal` is a separate, minimal binary that provides remote terminal access. It's built to run **directly on the host via systemd**, not inside a container — `ota_agent`/`ota_updater` run in Docker, so a shell spawned from inside them would only ever see the container's own namespaces, not the real host. This binary is deliberately independent of `ota_agent`/`ota_updater` and requires no changes to either. It holds a persistent connection to the cloud API's terminal-agent WebSocket (its own dedicated channel — nothing to do with the OTA agent/updater WebSockets) and is notified directly the moment the portal creates a session for it.
 
-> **Security note:** this binary runs as root and gives an unrestricted host
-> shell to anyone who can open a terminal session for this device through the
-> portal. Treat `OM_API_KEY` on a device running this service as equivalent
-> to a root credential.
+> **Security note:** this binary runs as root and gives an unrestricted host shell to anyone who can open a terminal session for this device through the portal. Treat `OM_API_KEY` on a device running this service as equivalent to a root credential.
 
 ```bash
 export OM_API_KEY="your-api-key"
@@ -106,12 +81,47 @@ export TERMINAL_UPDATE_MANIFEST_URL="https://assets.openmind.com/ota/terminal/sc
 export TERMINAL_UPDATES_DIR="/var/lib/om1-terminal/updates"
 ```
 
-It also self-updates: every 10 minutes (and once at startup) it checks
-`TERMINAL_UPDATE_MANIFEST_URL` for a build newer than the one it was compiled
-with, and if found, downloads, verifies, and atomically replaces its own
-binary, then exits so systemd (`Restart=always`) relaunches it. Install with
-the provided [`deploy/om1-terminal.service`](deploy/om1-terminal.service)
-unit file.
+It also self-updates: every 10 minutes (and once at startup) it checks `TERMINAL_UPDATE_MANIFEST_URL` for a build newer than the one it was compiled with, and if found, downloads, verifies, and atomically replaces its own binary, then exits so systemd (`Restart=always`) relaunches it. Install with the provided [`deploy/om1-terminal.service`](deploy/om1-terminal.service) unit file.
+
+The terminal binary can be built and run directly from source, but in production it should be downloaded from the OTA server and installed as a systemd service.
+
+```bash
+curl -sL -o terminal https://assets.openmind.com/ota/terminal/1787172974/terminal-linux-arm64
+```
+
+Create the service file at `/etc/systemd/system/om1-terminal.service`:
+
+```ini
+[Unit]
+Description=OM1 Remote Terminal Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/om1/terminal.env
+ExecStart=/opt/om1/bin/terminal
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then create `/etc/om1/terminal.env` with the environment variables above, and enable the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable om1-terminal.service
+sudo systemctl start om1-terminal.service
+```
+
+To check the logs:
+
+```bash
+sudo journalctl -u om1-terminal.service -f
+```
 
 ## Usage
 
@@ -122,8 +132,7 @@ unit file.
 # Run the updater
 ./bin/updater
 
-# Run the terminal agent (host-native — install via systemd instead in
-# production, see deploy/om1-terminal.service)
+# Run the terminal agent (host-native — install via systemd instead in production, see deploy/om1-terminal.service)
 ./bin/terminal
 ```
 
@@ -143,9 +152,7 @@ docker build -t orin-ota-agent .
 docker-compose up -d
 ```
 
-The compose file mounts the host Docker socket and the host `docker` /
-`docker-compose` binaries into the containers so the Go binaries can drive the
-host's Docker daemon.
+The compose file mounts the host Docker socket and the host `docker` / `docker-compose` binaries into the containers so the Go binaries can drive the host's Docker daemon.
 
 ## Development
 
@@ -165,5 +172,4 @@ go mod tidy
 
 ## License
 
-This project is licensed under the MIT License – see the [LICENSE](LICENSE) file
-for details.
+This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
