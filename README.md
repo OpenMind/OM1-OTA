@@ -85,13 +85,28 @@ It also self-updates: every 10 minutes (and once at startup) it checks `TERMINAL
 
 The terminal binary can be built and run directly from source, but in production it should be downloaded from the OTA server and installed as a systemd service.
 
+Download the `terminal` binary:
+
 ```bash
-curl -sL -o terminal https://assets.openmind.com/ota/terminal/1787172974/terminal-linux-arm64
+sudo mkdir -p /opt/om1/bin
+sudo curl -sL -o /opt/om1/bin/terminal https://assets.openmind.com/ota/terminal/1787172974/terminal-linux-arm64
+sudo chmod +x /opt/om1/bin/terminal
+```
+
+Create the environment file at `/etc/om1/terminal.env`:
+
+```bash
+sudo mkdir -p /etc/om1
+sudo tee /etc/om1/terminal.env > /dev/null <<'EOF'
+OM_API_KEY=your_api_key_here
+OM_API_KEY_ID=your_api_key_id_here
+EOF
 ```
 
 Create the service file at `/etc/systemd/system/om1-terminal.service`:
 
-```ini
+```bash
+sudo tee /etc/systemd/system/om1-terminal.service > /dev/null <<'EOF'
 [Unit]
 Description=OM1 Remote Terminal Agent
 After=network-online.target
@@ -107,9 +122,10 @@ User=root
 
 [Install]
 WantedBy=multi-user.target
+EOF
 ```
 
-Then create `/etc/om1/terminal.env` with the environment variables above, and enable the service:
+Then enable and start the service:
 
 ```bash
 sudo systemctl daemon-reload
@@ -117,9 +133,10 @@ sudo systemctl enable om1-terminal.service
 sudo systemctl start om1-terminal.service
 ```
 
-To check the logs:
+You can check its status and logs with:
 
 ```bash
+sudo systemctl status om1-terminal.service
 sudo journalctl -u om1-terminal.service -f
 ```
 
