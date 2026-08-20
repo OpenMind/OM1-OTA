@@ -3,13 +3,18 @@ package terminal
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
 )
+
+// maxSessionDuration bounds how long a single terminal session may stay open.
+const maxSessionDuration = 10 * time.Minute
 
 // Manager triggers and runs terminal sessions on demand.
 type Manager struct {
@@ -55,6 +60,7 @@ func (m *Manager) runSession(sessionID string) {
 	defer func() { _ = conn.Close() }()
 
 	cmd := exec.Command(m.shell)
+	cmd.Env = append(os.Environ(), "BASH_SILENCE_DEPRECATION_WARNING=1")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		zap.S().Errorw("Failed to start PTY", "session_id", sessionID, "error", err)
@@ -63,6 +69,12 @@ func (m *Manager) runSession(sessionID string) {
 	defer func() { _ = ptmx.Close() }()
 
 	zap.S().Infow("Terminal session started", "session_id", sessionID, "shell", m.shell)
+
+	if data, err := json.Marshal(map[string]string{"type": "status", "status": "active"}); err == nil {
+		if werr := conn.WriteMessage(websocket.TextMessage, data); werr != nil {
+			zap.S().Warnw("Failed to send active status", "session_id", sessionID, "error", werr)
+		}
+	}
 
 	var closeOnce sync.Once
 	done := make(chan struct{})
@@ -114,7 +126,12 @@ func (m *Manager) runSession(sessionID string) {
 		}
 	}()
 
-	<-done
+	select {
+	case <-done:
+	case <-time.After(maxSessionDuration):
+		zap.S().Infow("Terminal session reached max duration", "session_id", sessionID)
+		closeDone()
+	}
 
 	_ = cmd.Process.Kill()
 	_ = cmd.Wait()
