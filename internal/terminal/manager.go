@@ -60,7 +60,7 @@ func (m *Manager) runSession(sessionID string) {
 	defer func() { _ = conn.Close() }()
 
 	cmd := exec.Command(m.shell)
-	cmd.Env = append(os.Environ(), "BASH_SILENCE_DEPRECATION_WARNING=1")
+	cmd.Env = append(os.Environ(), "BASH_SILENCE_DEPRECATION_WARNING=1", "TERM=xterm-256color")
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		zap.S().Errorw("Failed to start PTY", "session_id", sessionID, "error", err)
