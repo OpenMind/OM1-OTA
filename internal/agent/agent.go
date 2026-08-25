@@ -50,6 +50,7 @@ var defaultContainerDescriptions = map[string]string{
 	"om1_telemetry":       "OM1 Telemetry container for collecting telemetry data",
 	"grafana":             "Grafana container for visualizing telemetry data",
 	"prometheus":          "Prometheus container for data collection and monitoring",
+	"portal":              "OM1 Portal container serving the local teleops on the robot",
 }
 
 // Agent wraps a BaseOTA with container status reporting.
