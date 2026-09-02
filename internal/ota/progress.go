@@ -18,17 +18,27 @@ type wsSender interface {
 
 // progressFrame is the JSON payload sent for each progress update.
 type progressFrame struct {
-	Type      string `json:"type"`
-	Status    string `json:"status"`
-	Message   string `json:"message"`
-	Progress  int    `json:"progress"`
-	Timestamp string `json:"timestamp"`
+	Type        string `json:"type"`
+	Status      string `json:"status"`
+	Message     string `json:"message"`
+	Progress    int    `json:"progress"`
+	Timestamp   string `json:"timestamp"`
+	ServiceName string `json:"service_name,omitempty"`
+	Action      string `json:"action,omitempty"`
 }
 
 // ProgressReporter sends OTA progress updates over a WebSocket connection.
 type ProgressReporter struct {
-	mu sync.RWMutex
-	ws wsSender
+	mu        sync.RWMutex
+	ws        wsSender
+	operation progressFrame
+}
+
+// SetOperation records the operation whose progress is reported from now on.
+func (p *ProgressReporter) SetOperation(serviceName, action string) {
+	p.mu.Lock()
+	p.operation = progressFrame{ServiceName: serviceName, Action: action}
+	p.mu.Unlock()
 }
 
 // NewProgressReporter creates a reporter, optionally bound to a WebSocket client.
@@ -47,6 +57,7 @@ func (p *ProgressReporter) SetWSClient(ws wsSender) {
 func (p *ProgressReporter) SendProgressUpdate(status, message string, progress int) {
 	p.mu.RLock()
 	ws := p.ws
+	frame := p.operation
 	p.mu.RUnlock()
 
 	if ws == nil {
@@ -60,13 +71,12 @@ func (p *ProgressReporter) SendProgressUpdate(status, message string, progress i
 		return
 	}
 
-	frame := progressFrame{
-		Type:      "ota_progress",
-		Status:    status,
-		Message:   message,
-		Progress:  progress,
-		Timestamp: time.Now().UTC().Format(isoTimestampLayout),
-	}
+	frame.Type = "ota_progress"
+	frame.Status = status
+	frame.Message = message
+	frame.Progress = progress
+	frame.Timestamp = time.Now().UTC().Format(isoTimestampLayout)
+
 	payload, err := json.Marshal(frame)
 	if err != nil {
 		zap.S().Warnw("Failed to encode progress update", "error", err)

@@ -109,6 +109,8 @@ func (o *BaseOTA) OTAProcess(message []byte) {
 
 	zap.S().Infow("Processing action", "action", action, "service", serviceName)
 
+	o.Progress.SetOperation(serviceName, action)
+
 	switch action {
 	case "upgrade":
 		o.Actions.HandleUpgrade(data, serviceName)
