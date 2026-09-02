@@ -29,9 +29,9 @@ type progressFrame struct {
 
 // ProgressReporter sends OTA progress updates over a WebSocket connection.
 type ProgressReporter struct {
-	mu        sync.RWMutex
 	ws        wsSender
 	operation progressFrame
+	mu        sync.RWMutex
 }
 
 // SetOperation records the operation whose progress is reported from now on.
